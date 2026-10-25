@@ -26,7 +26,8 @@ npm test                    # unit + rules + storefront e2e
 npm run test:e2e:emulator   # sign-in, orders, moderation against the Firebase emulators
 ```
 
-Rules and emulator tests need Java 11+ (Firebase Emulator Suite). They run under the
+Requires Node.js 22+ (`firebase-admin`, used by the staff-claims script and its tests, does not
+install on older versions). Rules and emulator tests need Java 11+ (Firebase Emulator Suite). They run under the
 `demo-yummy-sweets` project id, which cannot reach a real Firebase project; the browser tests
 block every non-local network request.
 
