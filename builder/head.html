@@ -12,37 +12,23 @@
   <meta property="og:title" content="Yummy Sweets — Artisanal Boutique Bakery" />
   <meta property="og:description" content="Handcrafted artisan cakes & desserts. Freshly baked daily, delivered to your doorstep from Yummy Sweets." />
   <meta property="og:image" content="https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=1200&auto=format&fit=crop&q=80" />
-  <meta property="og:url" content="https://yummysweets.local" />
+  <meta property="og:site_name" content="Yummy Sweets" />
+  <!--SITE_URL_META: canonical + og:url are added by builder/assemble.js when SITE_URL is set-->
   <meta name="twitter:card" content="summary_large_image" />
 
-  <!-- Google Fonts: Latin + Arabic Typography -->
+  <!-- Google Fonts: only the default pairing loads with the page; other families load on demand (builder/lib/fonts.js) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600;700&family=Noto+Kufi+Arabic:wght@500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&family=Vazirmatn:wght@400;500;600;700&family=Cairo:wght@400;500;600;700&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;600;700&family=DM+Serif+Display:wght@400&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=DM+Sans:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&family=Amiri:wght@400;700&family=Tajawal:wght@400;500;700&family=Almarai:wght@400;700&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=DM+Sans:wght@400;500;600;700&family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
-  <!-- Structured Data: JSON-LD Bakery Schema -->
-  <script type="application/ld+json">
+  <!-- Structured data. Contact fields are filled in at runtime from the shop config (builder/lib/seo.js);
+       nothing here is a placeholder for the business's real details. -->
+  <script type="application/ld+json" id="ldJson">
   {
     "@context": "https://schema.org",
     "@type": "Bakery",
     "name": "Yummy Sweets",
     "description": "Artisanal boutique bakery crafting bespoke layer cakes, gourmet cupcakes, and delicate French desserts.",
-    "telephone": "+9647501234567",
-    "email": "hello@yummysweets.com",
-    "priceRange": "$$",
-    "address": {
-      "@type": "PostalAddress",
-      "streetAddress": "Dream City Avenue, Near English Village",
-      "addressLocality": "Erbil",
-      "addressCountry": "IQ"
-    },
-    "openingHoursSpecification": [
-      {
-        "@type": "OpeningHoursSpecification",
-        "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
-        "opens": "09:00",
-        "closes": "22:00"
-      }
-    ]
+    "address": { "@type": "PostalAddress", "addressLocality": "Erbil", "addressCountry": "IQ" }
   }
   </script>

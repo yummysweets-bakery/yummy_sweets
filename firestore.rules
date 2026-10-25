@@ -1,49 +1,284 @@
 rules_version = '2';
+
+// Yummy Sweets — Firestore security rules
+//
+// Authorization model
+// - Privileged roles come ONLY from Firebase Auth custom claims
+//   (`role`: 'dev' | 'admin' | 'staff', `perms`: list of panel sections for staff).
+//   Claims are set by a trusted admin process (scripts/set-staff-claims.mjs), never by the browser.
+// - Two shop-owner Google accounts are bootstrapped by *verified* email so the shop is not
+//   locked out before claims are assigned. Remove them once claims are in place.
+// - Nothing a client writes into Firestore can grant privileges: user profiles have no role field.
+// - Everything not matched below is denied.
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 1. Global Safety Net
-    match /{document=**} {
-      allow read, write: if false;
+
+    // ---------------------------------------------------------------- identity
+    function signedIn() {
+      return request.auth != null;
     }
 
-    // 3. Primitives
-    function isSignedIn() { return request.auth != null; }
+    function claim(name, fallback) {
+      return request.auth == null ? fallback : request.auth.token.get(name, fallback);
+    }
+
+    function isOwner() {
+      return signedIn()
+        && claim('email_verified', false) == true
+        && claim('email', '') is string
+        && claim('email', '').lower() in ['qaessafty@gmail.com', 'yumy.swets@gmail.com'];
+    }
+
+    function isDev() {
+      return signedIn() && (claim('role', '') == 'dev' || isOwner());
+    }
+
     function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email.lower() in ['qaessafty@gmail.com', 'yumy.swets@gmail.com'] ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'dev', 'staff'])
-      );
+      return signedIn() && (claim('role', '') in ['admin', 'dev'] || isOwner());
     }
-    
-    // Match config
-    match /config/{configId} {
+
+    function staffCan(perm) {
+      return signedIn()
+        && claim('role', '') == 'staff'
+        && claim('perms', []) is list
+        && perm in claim('perms', []);
+    }
+
+    function canManage(perm) {
+      return isAdmin() || staffCan(perm);
+    }
+
+    // ---------------------------------------------------------------- helpers
+    function changedKeys() {
+      return resource == null
+        ? request.resource.data.keys()
+        : request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function optString(d, key, maxLen) {
+      return !(key in d) || (d[key] is string && d[key].size() <= maxLen);
+    }
+
+    function optMap(d, key) {
+      return !(key in d) || d[key] is map;
+    }
+
+    // ---------------------------------------------------------------- config
+    // Public storefront settings, grouped by the control-panel section that edits them.
+    function brandKeys()   { return ['shopName', 'tagline', 'logoMode', 'logoEmoji', 'logoImage', 'logoUrl', 'logoImageUrl', 'announcement']; }
+    function themeKeys()   { return ['theme']; }
+    function aboutKeys()   { return ['aboutUs']; }
+    function faqKeys()     { return ['faq']; }
+    function reviewKeys()  { return ['reviews']; }
+    function contactKeys() { return ['contact']; }
+    function socialKeys()  { return ['socials']; }
+    function economyKeys() { return ['economy', 'iqdRate']; }
+    function fontKeys()    { return ['englishBodyFont', 'englishDisplayFont', 'kurdishBodyFont', 'kurdishDisplayFont']; }
+    function metaKeys()    { return ['updatedAt', 'updatedBy', 'schemaVersion']; }
+
+    function staffPerms() {
+      return claim('role', '') == 'staff' && claim('perms', []) is list ? claim('perms', []) : [];
+    }
+
+    // Keys a staff member may change, computed once from their permission list
+    // (keeps rule evaluation well under Firestore's expression limit).
+    function staffConfigKeys(perms) {
+      return ('brand' in perms ? brandKeys() : [])
+        .concat('theme' in perms ? themeKeys() : [])
+        .concat('about' in perms ? aboutKeys() : [])
+        .concat('faq' in perms ? faqKeys() : [])
+        .concat('reviews' in perms ? reviewKeys() : [])
+        .concat('contact' in perms ? contactKeys() : [])
+        .concat('socials' in perms ? socialKeys() : [])
+        .concat('economy' in perms ? economyKeys() : [])
+        .concat('fonts' in perms ? fontKeys() : [])
+        .concat(metaKeys());
+    }
+
+    function allConfigKeys() {
+      return brandKeys().concat(themeKeys()).concat(aboutKeys()).concat(faqKeys())
+        .concat(reviewKeys()).concat(contactKeys()).concat(socialKeys())
+        .concat(economyKeys()).concat(fontKeys()).concat(metaKeys())
+        .concat(['showWatermark']);
+    }
+
+    function validPublicConfig(d) {
+      return d.keys().hasOnly(allConfigKeys())
+        && optMap(d, 'shopName') && optMap(d, 'tagline') && optMap(d, 'announcement')
+        && optMap(d, 'theme') && optMap(d, 'aboutUs') && optMap(d, 'contact')
+        && optMap(d, 'socials') && optMap(d, 'economy')
+        && (!('faq' in d) || d.faq is list)
+        && (!('reviews' in d) || d.reviews is list)
+        && (!('showWatermark' in d) || d.showWatermark is bool)
+        && optString(d, 'logoImage', 700000)
+        && optString(d, 'logoUrl', 2000)
+        && optString(d, 'logoImageUrl', 2000);
+    }
+
+    function canWritePublicConfig() {
+      return validPublicConfig(request.resource.data)
+        && (
+          isDev()
+          || (isAdmin() && !changedKeys().hasAny(['showWatermark']))
+          || (claim('role', '') == 'staff' && changedKeys().hasOnly(staffConfigKeys(staffPerms())))
+        );
+    }
+
+    match /config/public {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update: if canWritePublicConfig();
+      allow delete: if false;
     }
 
-    // Match users
-    match /users/{userId} {
-      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow list: if isAdmin();
-      allow create: if isSignedIn() && request.auth.uid == userId;
-      allow update: if isSignedIn() && (isAdmin() || request.auth.uid == userId);
-      allow delete: if isAdmin();
+    // Legacy document from the previous app version: readable for migration, no longer writable.
+    match /config/main {
+      allow read: if true;
+      allow write: if false;
     }
 
-    // Match products
+    // Staff-only settings.
+    match /config/private {
+      allow read, write: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------- products
+    function validProduct(p, productId) {
+      return p.keys().hasOnly(['id', 'category', 'emoji', 'img', 'priceUSD', 'tag', 'name', 'desc', 'unit',
+                               'exclusions', 'sortOrder', 'updatedAt', 'updatedBy'])
+        && p.keys().hasAll(['id', 'category', 'priceUSD', 'name'])
+        && p.id == productId
+        && p.category is string && p.category.size() > 0 && p.category.size() <= 50
+        && p.priceUSD is number && p.priceUSD >= 0 && p.priceUSD <= 100000
+        && p.name is map && p.name.get('en', '') is string
+        && p.name.get('en', '').size() > 0 && p.name.get('en', '').size() <= 120
+        && optMap(p, 'desc') && optMap(p, 'unit')
+        && optString(p, 'emoji', 16)
+        && optString(p, 'tag', 50)
+        && optString(p, 'img', 900000)
+        && (!('exclusions' in p) || p.exclusions == null || (p.exclusions is list && p.exclusions.size() <= 20));
+    }
+
     match /products/{productId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update: if canManage('products') && validProduct(request.resource.data, productId);
+      allow delete: if canManage('products');
     }
 
-    // Match orders
-    match /orders/{orderId} {
-      allow get: if isSignedIn() && (resource.data.customerId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.customerId == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() && (request.resource.data.customerId == request.auth.uid || isAdmin());
-      allow update: if isSignedIn() && (isAdmin() || resource.data.customerId == request.auth.uid);
+    // ---------------------------------------------------------------- users (customer profiles)
+    // Profiles carry no role or permission fields — privileges live only in custom claims.
+    function profileKeys() { return ['name', 'phone', 'email', 'address', 'createdAt', 'updatedAt']; }
+
+    function validProfileFields(d) {
+      return optString(d, 'name', 80)
+        && optString(d, 'phone', 32)
+        && optString(d, 'email', 254)
+        && optString(d, 'address', 300);
+    }
+
+    match /users/{userId} {
+      allow get: if (signedIn() && request.auth.uid == userId) || canManage('customers');
+      allow list: if canManage('customers');
+      allow create: if signedIn() && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(profileKeys())
+        && validProfileFields(request.resource.data);
+      // Profiles written by the previous app may hold extra fields (e.g. a `role`, which no rule
+      // trusts). Updates may change profile fields only, so those documents stay editable while
+      // nothing else can be added or altered.
+      allow update: if signedIn() && request.auth.uid == userId
+        && changedKeys().hasOnly(profileKeys())
+        && validProfileFields(request.resource.data);
       allow delete: if isAdmin();
+    }
+
+    // Staff directory: the admin's record of who should hold which role.
+    // Informational only — scripts/set-staff-claims.mjs turns it into custom claims.
+    match /staffDirectory/{staffId} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['email', 'name', 'role', 'perms', 'updatedAt', 'updatedBy'])
+        && request.resource.data.role in ['staff', 'admin']
+        && (!('perms' in request.resource.data) || request.resource.data.perms is list);
+      allow delete: if isAdmin();
+    }
+
+    // Private notes staff keep about customers.
+    match /customerNotes/{customerId} {
+      allow read, write: if canManage('customers');
+    }
+
+    // ---------------------------------------------------------------- orders
+    function validTotals(t) {
+      return t is map
+        && t.keys().hasAll(['subtotal', 'discount', 'delivery', 'tax', 'total'])
+        && t.subtotal is number && t.subtotal >= 0
+        && t.discount is number && t.discount >= 0 && t.discount <= t.subtotal
+        && t.delivery is number && t.delivery >= 0
+        && t.tax is number && t.tax >= 0
+        && t.total is number
+        && math.abs(t.total - (t.subtotal - t.discount + t.delivery + t.tax)) < 0.01;
+    }
+
+    function validNewOrder(o) {
+      return o.keys().hasOnly(['customerId', 'customer', 'items', 'totals', 'currency', 'exchangeRate',
+                               'promoCode', 'fulfillmentAt', 'note', 'lang', 'status', 'createdAt', 'source', 'ref'])
+        && o.keys().hasAll(['customerId', 'items', 'totals', 'fulfillmentAt', 'status', 'createdAt'])
+        && o.customerId == request.auth.uid
+        && o.status == 'pending'
+        && o.createdAt == request.time
+        && o.fulfillmentAt is timestamp && o.fulfillmentAt > request.time
+        && o.items is list && o.items.size() > 0 && o.items.size() <= 50
+        && validTotals(o.totals)
+        && optMap(o, 'customer')
+        && optString(o, 'note', 500)
+        && optString(o, 'currency', 8)
+        && optString(o, 'promoCode', 40)
+        && optString(o, 'ref', 20);
+    }
+
+    function canSeeOrders() {
+      return canManage('customers') || canManage('economy');
+    }
+
+    match /orders/{orderId} {
+      allow get: if signedIn() && (resource.data.customerId == request.auth.uid || canSeeOrders());
+      allow list: if signedIn() && (resource.data.customerId == request.auth.uid || canSeeOrders());
+      allow create: if signedIn() && validNewOrder(request.resource.data);
+      // Customers cannot edit orders after placing them; staff can only move the status and add a note.
+      allow update: if canSeeOrders()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'staffNote', 'updatedAt', 'updatedBy'])
+        && request.resource.data.status in ['pending', 'confirmed', 'completed', 'cancelled']
+        && optString(request.resource.data, 'staffNote', 1000);
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------- reviews
+    function validNewReview(r) {
+      return r.keys().hasOnly(['authorUid', 'name', 'text', 'rating', 'lang', 'status', 'createdAt'])
+        && r.keys().hasAll(['authorUid', 'name', 'text', 'status', 'createdAt'])
+        && r.authorUid == request.auth.uid
+        && r.status == 'pending'
+        && r.createdAt == request.time
+        && r.name is string && r.name.size() > 0 && r.name.size() <= 60
+        && r.text is string && r.text.size() > 0 && r.text.size() <= 1000
+        && (!('rating' in r) || (r.rating is int && r.rating >= 1 && r.rating <= 5))
+        && optString(r, 'lang', 5);
+    }
+
+    match /reviews/{reviewId} {
+      allow get, list: if resource.data.status == 'approved'
+        || (signedIn() && resource.data.authorUid == request.auth.uid)
+        || canManage('reviews');
+      allow create: if signedIn() && validNewReview(request.resource.data);
+      allow update: if canManage('reviews')
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'moderatedAt', 'moderatedBy'])
+        && request.resource.data.status in ['pending', 'approved', 'rejected'];
+      allow delete: if canManage('reviews');
+    }
+
+    // ---------------------------------------------------------------- everything else
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

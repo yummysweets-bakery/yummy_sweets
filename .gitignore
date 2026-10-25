@@ -9,3 +9,13 @@ coverage/
 
 # Codebuff local metadata
 .freebuff/
+
+# Firebase CLI / emulators
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Test output
+test-results/
+playwright-report/
