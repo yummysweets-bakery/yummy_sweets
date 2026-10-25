@@ -1,3 +1,5 @@
+  <a class="skip-link" href="#menu" data-i18n="skipToMenu">Skip to the menu</a>
+
   <!-- Announcement Bar -->
   <aside class="announcement-bar" id="announcementBar" role="region" aria-label="Store Announcement">
     <span id="announcementText" data-i18n="announcementText">Pre-order for weekend celebrations! <strong>Free local delivery</strong> on orders over $50.</span>
@@ -21,8 +23,8 @@
         <a href="#how-it-works" class="nav__link" data-i18n="navHowItWorks">How It Works</a>
         <a href="#story" class="nav__link" data-i18n="navOurStory">Our Story</a>
         <a href="#reviews" class="nav__link" data-i18n="navReviews">Reviews</a>
-        <a href="#contact" class="nav__link" data-i18n="navContact">Contact</a>
         <a href="#faq" class="nav__link" data-i18n="navFaq">FAQ</a>
+        <a href="#contact" class="nav__link" data-i18n="navContact">Contact</a>
       </nav>
 
       <!-- Header Controls & Auth -->
@@ -65,10 +67,10 @@
     <a href="#how-it-works" class="nav__link" onclick="app.closeMobileMenu()" data-i18n="navHowItWorks">How It Works</a>
     <a href="#story" class="nav__link" onclick="app.closeMobileMenu()" data-i18n="navOurStory">Our Story</a>
     <a href="#reviews" class="nav__link" onclick="app.closeMobileMenu()" data-i18n="navReviews">Reviews</a>
-    <a href="#contact" class="nav__link" onclick="app.closeMobileMenu()" data-i18n="navContact">Contact</a>
     <a href="#faq" class="nav__link" onclick="app.closeMobileMenu()" data-i18n="navFaq">FAQ</a>
+    <a href="#contact" class="nav__link" onclick="app.closeMobileMenu()" data-i18n="navContact">Contact</a>
 
-    <div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap;">
+    <div class="mobile-nav__controls">
       <div class="switch-group" role="group" aria-label="Language Selector">
         <button type="button" class="switch-btn" id="btnLangEnMobile" onclick="app.setLanguage('en')">EN</button>
         <button type="button" class="switch-btn" id="btnLangKuMobile" onclick="app.setLanguage('ku')">کوردی</button>
@@ -84,7 +86,7 @@
       </div>
     </div>
 
-    <div id="mobileAuthContainer" style="margin-top:8px;">
+    <div id="mobileAuthContainer" class="mobile-nav__auth">
       <!-- Populated dynamically by app.updateAuthUI() -->
     </div>
   </nav>
@@ -119,10 +121,10 @@
               <span data-i18n="trust3">Custom Messages</span>
             </div>
           </div>
-          <div class="hero__quote" style="margin-top: 32px; padding: 16px 24px; border-left: 3px solid var(--berry); background: var(--surface); opacity: 0.95; border-radius: 0 12px 12px 0;">
-            <p style="font-size: 1.1rem; font-weight: 500; font-style: italic; color: var(--ink); margin-bottom: 8px;">"Life is short, make it sweet."</p>
-            <p style="font-size: 1.2rem; font-weight: 600; color: var(--berry); font-family: 'Vazirmatn', sans-serif;">"ژیان کورتە، با شیرین بێت."</p>
-          </div>
+          <figure class="hero__quote">
+            <p class="hero__quote-en" lang="en">"Life is short, make it sweet."</p>
+            <p class="hero__quote-ku" lang="ckb" dir="rtl">"ژیان کورتە، با شیرین بێت."</p>
+          </figure>
         </div>
         <div class="hero__visual">
           <div class="hero__card">
@@ -138,32 +140,6 @@
       </div>
     </section>
 
-    <div class="section-divider"></div>
-
-    <!-- Features Section -->
-    <section class="section section--shell" id="features">
-      <div class="container">
-        <div class="features-grid">
-          <div class="feature-card">
-            <div class="feature-icon-tile"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg></div>
-            <h3 class="feature-card__title" data-i18n="feat1Title">Real Ingredients</h3>
-            <p data-i18n="feat1Desc">Pure butter, Belgian chocolate, fresh seasonal berries, and zero artificial preservatives.</p>
-          </div>
-
-          <div class="feature-card">
-            <div class="feature-icon-tile"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13" rx="1"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></div>
-            <h3 class="feature-card__title" data-i18n="feat2Title">Careful Delivery</h3>
-            <p data-i18n="feat2Desc">Handled with gentle temperature-controlled care so your cake arrives picture-perfect.</p>
-          </div>
-
-          <div class="feature-card">
-            <div class="feature-icon-tile"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></div>
-            <h3 class="feature-card__title" data-i18n="feat3Title">Custom Creations</h3>
-            <p data-i18n="feat3Desc">Bespoke tiers, customized chocolate writing, and tailored sweetness for every milestone.</p>
-          </div>
-        </div>
-      </div>
-    </section>
 
     <!-- Menu Section -->
     <section class="section" id="menu">
@@ -174,6 +150,7 @@
           <p class="lead" data-i18n="menuLead">Browse our signature cakes, cupcakes, and desserts. Click 'Add to Order' to assemble your WhatsApp cart.</p>
         </div>
 
+        <div class="menu-toolbar" id="menuToolbar">
         <!-- Storefront Menu Search Bar (Section 7.8) -->
         <div class="menu-search-wrapper" role="search">
           <div class="menu-search-bar">
@@ -240,9 +217,10 @@
             <!-- Dynamic: Showing X of Y cakes -->
           </div>
         </div>
+        </div>
 
         <!-- Dynamic Menu Grid -->
-        <div class="menu-grid" id="menuGrid" role="region" aria-live="polite">
+        <div class="menu-grid" id="menuGrid" role="region" aria-label="Menu items">
           <!-- Rendered dynamically by app.renderMenu() -->
         </div>
       </div>
@@ -315,6 +293,31 @@
                 <span data-i18n="bullet3">Dedicated pastry artisans with European techniques</span>
               </li>
             </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="section section--features" id="features" aria-label="Why customers choose us">
+      <div class="container">
+        <div class="features-grid">
+          <div class="feature-card">
+            <div class="feature-icon-tile"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg></div>
+            <h3 class="feature-card__title" data-i18n="feat1Title">Real Ingredients</h3>
+            <p data-i18n="feat1Desc">Pure butter, Belgian chocolate, fresh seasonal berries, and zero artificial preservatives.</p>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon-tile"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13" rx="1"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></div>
+            <h3 class="feature-card__title" data-i18n="feat2Title">Careful Delivery</h3>
+            <p data-i18n="feat2Desc">Handled with gentle temperature-controlled care so your cake arrives picture-perfect.</p>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon-tile"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></div>
+            <h3 class="feature-card__title" data-i18n="feat3Title">Custom Creations</h3>
+            <p data-i18n="feat3Desc">Bespoke tiers, customized chocolate writing, and tailored sweetness for every milestone.</p>
           </div>
         </div>
       </div>
@@ -406,19 +409,19 @@
       <!-- Promo Code Field -->
       <div class="tray-promo-box" id="trayPromoArea">
         <div class="tray-promo-row">
-          <input type="text" id="trayPromoInput" class="tray-promo-input" placeholder="Promo code..." maxlength="20" onkeydown="if(event.key==='Enter'){event.preventDefault();app.applyCartPromo();}" />
+          <input type="text" id="trayPromoInput" class="tray-promo-input" placeholder="Promo code" data-i18n-placeholder="trayPromoPlaceholder" aria-label="Promo code" maxlength="20" onkeydown="if(event.key==='Enter'){event.preventDefault();app.applyCartPromo();}" />
           <button type="button" class="btn btn--xs btn--primary" id="btnApplyPromo" onclick="app.applyCartPromo()" data-i18n="trayApplyPromo">Apply</button>
         </div>
         <div id="trayPromoFeedback" class="tray-promo-feedback"></div>
       </div>
       <!-- Order Note Field -->
-      <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
-        <label for="trayFulfillmentDate" style="display:block; font-size: 0.82rem; color: rgba(255, 255, 255, 0.85); margin-bottom: 6px;">Requested Delivery/Pickup Date & Time *</label>
-        <input type="datetime-local" id="trayFulfillmentDate" class="tray-promo-input" style="width:100%;" required />
+      <div class="tray-field">
+        <label for="trayFulfillmentDate" class="tray-field__label" data-i18n="trayDateLabel">Delivery or pickup date and time *</label>
+        <input type="datetime-local" id="trayFulfillmentDate" class="tray-promo-input tray-field__input" required />
       </div>
-      <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
-        <label for="trayOrderNote" style="display:block; font-size: 0.82rem; color: rgba(255, 255, 255, 0.85); margin-bottom: 6px;" data-i18n="orderNoteLabel">Note for the baker (optional)</label>
-        <textarea id="trayOrderNote" class="tray-promo-input" style="width:100%; min-height: 60px; resize: vertical;" maxlength="300" placeholder="e.g. &quot;Happy birthday Sara&quot; or &quot;leave at the door&quot;" data-i18n-placeholder="orderNotePlaceholder" oninput="app.orderNote = this.value;"></textarea>
+      <div class="tray-field">
+        <label for="trayOrderNote" class="tray-field__label" data-i18n="orderNoteLabel">Note for the baker (optional)</label>
+        <textarea id="trayOrderNote" class="tray-promo-input tray-field__input tray-field__textarea" maxlength="300" placeholder="e.g. &quot;Happy birthday Sara&quot; or &quot;leave at the door&quot;" data-i18n-placeholder="orderNotePlaceholder" oninput="app.orderNote = this.value;"></textarea>
       </div>
     </div>
 
@@ -439,16 +442,14 @@
       </div>
 
       <div class="order-tray__actions">
-        <button type="button" class="btn btn--ghost btn--sm tray-details-btn" id="btnTrayToggle" onclick="app.toggleTrayBreakdown()" aria-expanded="false">
+        <button type="button" class="tray-btn tray-btn--quiet tray-details-btn" id="btnTrayToggle" onclick="app.toggleTrayBreakdown()" aria-expanded="false" aria-controls="trayBreakdown">
           <span id="trayToggleLabel" data-i18n="trayDetails">Details ▾</span>
         </button>
-        <button type="button" class="btn btn--ghost btn--sm" style="color:#FFFFFF;border-color:rgba(255,255,255,0.25);" onclick="app.clearOrder()" data-i18n="trayClear">Clear</button>
-        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
-          <p style="font-size: 0.72rem; color: rgba(255,255,255,0.7); text-align: right; margin: 0; line-height: 1.2;">Payment via Cash on Delivery. Fee calculated on WhatsApp.</p>
-          <button type="button" class="btn btn--primary btn--sm" id="btnTrayWhatsApp" onclick="app.checkoutWhatsApp()" data-i18n="traySendWhatsApp">Send Order via WhatsApp</button>
-        </div>
+        <button type="button" class="tray-btn tray-btn--quiet" onclick="app.clearOrder()" data-i18n="trayClear">Clear</button>
+        <button type="button" class="tray-btn tray-btn--send" id="btnTrayWhatsApp" onclick="app.checkoutWhatsApp()" data-i18n="traySendWhatsApp">Send Order via WhatsApp</button>
       </div>
     </div>
+    <p class="order-tray__note" data-i18n="trayPaymentNote">Cash on delivery. We confirm the delivery fee on WhatsApp.</p>
   </aside>
 
 
@@ -504,8 +505,8 @@
 
         <div class="footer__col">
           <h4 data-i18n="footerHoursTitle">Baking Hours</h4>
-          <p class="text-small" id="footerHours" style="color:rgba(255,251,247,0.75);margin-bottom:12px;">Mon – Sun: 9:00 AM – 10:00 PM<br/>Fresh bakes ready by 10 AM daily</p>
-          <p class="text-small" style="color:rgba(255,251,247,0.75);"><span data-i18n="footerOrdersInfo">Orders &amp; inquiries:</span> <br/><strong id="footerPhone" style="color:var(--gold-soft);">+964 750 123 4567</strong></p>
+          <p class="text-small footer__muted" id="footerHours">Mon – Sun: 9:00 AM – 10:00 PM<br/>Fresh bakes ready by 10 AM daily</p>
+          <p class="text-small footer__muted"><span data-i18n="footerOrdersInfo">Orders &amp; inquiries:</span> <br/><strong id="footerPhone" class="footer__phone">+964 750 123 4567</strong></p>
         </div>
       </div>
 

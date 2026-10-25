@@ -850,6 +850,10 @@ fontPreview: 'Preview',
     economyPreviewSample: 'Sample order: $50 subtotal',
     trayDetails: 'Details ▾',
     trayDetailsClose: 'Close ▴',
+    trayDateLabel: 'Delivery or pickup date and time *',
+    trayPaymentNote: 'Cash on delivery. We confirm the delivery fee on WhatsApp.',
+    inOrderCount: '{n} in your order',
+    skipToMenu: 'Skip to the menu',
     trayApplyPromo: 'Apply',
     trayRemovePromo: 'Remove',
     trayPromoPlaceholder: 'Promo code',
@@ -1216,6 +1220,10 @@ fontPreview: 'پێشبینین',
     economyPreviewSample: 'داواکاری نموونە: 50 دۆلار کۆی لاوەکی',
     trayDetails: 'وردەکاری ▾',
     trayDetailsClose: 'داخستن ▴',
+    trayDateLabel: 'بەروار و کاتی گەیاندن یان وەرگرتن *',
+    trayPaymentNote: 'پارەدان لە کاتی گەیاندن. کرێی گەیاندن لە واتسئاپ پشتڕاست دەکەینەوە.',
+    inOrderCount: '{n} لە داواکارییەکەتدا',
+    skipToMenu: 'بڕۆ بۆ لیستی شیرینی',
     trayApplyPromo: 'جێبەجێکردن',
     trayRemovePromo: 'سڕینەوە',
     trayPromoPlaceholder: 'کۆدی داشکاندن',
@@ -2157,6 +2165,7 @@ const app = {
           <div class="cake-card__media">
             ${mediaHtml}
             ${tagBadge}
+            <span class="cake-card__count" data-count-for="${item.id}" hidden></span>
           </div>
           <div class="cake-card__body">
             <h3 class="cake-card__title">${name}</h3>
@@ -2174,6 +2183,22 @@ const app = {
         </article>
       `;
     }).join('');
+    this.syncMenuOrderState();
+  },
+
+  // Mark menu cards that are already in the order, so shoppers can see what they picked
+  syncMenuOrderState() {
+    const counts = new Map();
+    for (const item of this.order || []) {
+      if (item.qty > 0) counts.set(item.productId, (counts.get(item.productId) || 0) + item.qty);
+    }
+    document.querySelectorAll('.cake-card__count[data-count-for]').forEach(el => {
+      const n = counts.get(el.dataset.countFor) || 0;
+      const card = el.closest('.cake-card');
+      if (card) card.classList.toggle('is-in-order', n > 0);
+      el.hidden = n === 0;
+      el.textContent = n > 0 ? this.t('inOrderCount').replace('{n}', n) : '';
+    });
   },
 
   getShopName() {
@@ -2576,6 +2601,9 @@ const app = {
         itemNames.push(`${item.qty}× ${name}`);
       }
     }
+
+    document.body.classList.toggle('has-order-tray', totalCount > 0);
+    this.syncMenuOrderState();
 
     if (totalCount === 0) {
       tray.classList.remove('is-visible');
@@ -6358,6 +6386,9 @@ const app = {
     const btn = document.getElementById('burgerBtn');
     if (!nav || !btn) return;
 
+    const header = document.getElementById('mainHeader');
+    if (header) nav.style.top = `${Math.max(0, header.getBoundingClientRect().bottom)}px`;
+
     const isOpen = nav.classList.toggle('is-open');
     btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
   },
@@ -6390,6 +6421,8 @@ const app = {
         }
       }
     }, { passive: true });
+
+    this.setupScrollSpy();
 
     // Close Modals on Backdrop Click & Escape Key
     ['authModal', 'panelModal', 'historyModal'].forEach(id => {
@@ -6438,9 +6471,38 @@ const app = {
     });
   },
 
+  // Highlight the nav link of the section currently on screen
+  setupScrollSpy() {
+    if (!('IntersectionObserver' in window)) return;
+    const links = document.querySelectorAll('#desktopNav .nav__link, #mobileNav .nav__link');
+    const ids = [...new Set([...links].map(a => a.getAttribute('href')).filter(h => h && h.startsWith('#')))];
+    // The why-us strip continues the story, so it keeps "Our Story" lit
+    const alias = { features: 'story' };
+    const sections = [...ids, '#features'].map(h => document.querySelector(h)).filter(Boolean);
+
+    const onScreen = new Set();
+    const spy = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) onScreen.add(entry.target);
+        else onScreen.delete(entry.target);
+      });
+      // Sections not in the nav (like the hero) clear the highlight
+      const current = sections.find(sec => onScreen.has(sec));
+      const href = current ? `#${alias[current.id] || current.id}` : null;
+      links.forEach(a => {
+        const active = a.getAttribute('href') === href;
+        a.classList.toggle('is-active', active);
+        if (active) a.setAttribute('aria-current', 'location');
+        else a.removeAttribute('aria-current');
+      });
+    }, { rootMargin: '-45% 0px -50% 0px' });
+    sections.forEach(sec => spy.observe(sec));
+  },
+
   // Smooth Scroll Reveal via IntersectionObserver
   setupIntersectionObserver() {
     if (!('IntersectionObserver' in window)) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
     const observer = new IntersectionObserver((entries) => {
       entries.forEach((entry, index) => {
@@ -6457,6 +6519,8 @@ const app = {
 
     const targets = document.querySelectorAll('.feature-card, .cake-card, .step-card, .review-card, .faq-item, .info-card');
     targets.forEach(el => {
+      // Leave content that is already on screen alone so it never flashes out
+      if (el.getBoundingClientRect().top < window.innerHeight) return;
       el.style.opacity = '0';
       el.style.transform = 'translateY(24px)';
       el.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
