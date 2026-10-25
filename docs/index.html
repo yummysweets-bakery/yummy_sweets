@@ -12,38 +12,24 @@
   <meta property="og:title" content="Yummy Sweets — Artisanal Boutique Bakery" />
   <meta property="og:description" content="Handcrafted artisan cakes & desserts. Freshly baked daily, delivered to your doorstep from Yummy Sweets." />
   <meta property="og:image" content="https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=1200&auto=format&fit=crop&q=80" />
-  <meta property="og:url" content="https://yummysweets.local" />
+  <meta property="og:site_name" content="Yummy Sweets" />
+  
   <meta name="twitter:card" content="summary_large_image" />
 
-  <!-- Google Fonts: Latin + Arabic Typography -->
+  <!-- Google Fonts: only the default pairing loads with the page; other families load on demand (builder/lib/fonts.js) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600;700&family=Noto+Kufi+Arabic:wght@500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&family=Vazirmatn:wght@400;500;600;700&family=Cairo:wght@400;500;600;700&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;600;700&family=DM+Serif+Display:wght@400&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=DM+Sans:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&family=Amiri:wght@400;700&family=Tajawal:wght@400;500;700&family=Almarai:wght@400;700&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=DM+Sans:wght@400;500;600;700&family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
-  <!-- Structured Data: JSON-LD Bakery Schema -->
-  <script type="application/ld+json">
+  <!-- Structured data. Contact fields are filled in at runtime from the shop config (builder/lib/seo.js);
+       nothing here is a placeholder for the business's real details. -->
+  <script type="application/ld+json" id="ldJson">
   {
     "@context": "https://schema.org",
     "@type": "Bakery",
     "name": "Yummy Sweets",
     "description": "Artisanal boutique bakery crafting bespoke layer cakes, gourmet cupcakes, and delicate French desserts.",
-    "telephone": "+9647501234567",
-    "email": "hello@yummysweets.com",
-    "priceRange": "$$",
-    "address": {
-      "@type": "PostalAddress",
-      "streetAddress": "Dream City Avenue, Near English Village",
-      "addressLocality": "Erbil",
-      "addressCountry": "IQ"
-    },
-    "openingHoursSpecification": [
-      {
-        "@type": "OpeningHoursSpecification",
-        "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
-        "opens": "09:00",
-        "closes": "22:00"
-      }
-    ]
+    "address": { "@type": "PostalAddress", "addressLocality": "Erbil", "addressCountry": "IQ" }
   }
   </script>
 
@@ -259,10 +245,9 @@ h1, h2, h3, h4, h5 {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.72rem;
+  font-size: 0.86rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.02em;
   color: var(--berry);
   margin-bottom: 12px;
 }
@@ -291,6 +276,19 @@ p {
 small, .text-small {
   font-size: 0.82rem;
   line-height: 1.5;
+}
+
+/* Visually hidden, still announced by screen readers */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* Focus Visible Accessibility */
@@ -325,8 +323,8 @@ small, .text-small {
 
 /* Announcement Bar */
 .announcement-bar {
-  background-color: var(--cocoa);
-  color: var(--cream);
+  background-color: var(--inverse-bg, #2A201B);
+  color: var(--inverse-ink, #FFFBF7);
   font-size: 0.84rem;
   padding: 10px 20px;
   text-align: center;
@@ -336,7 +334,7 @@ small, .text-small {
 }
 
 .announcement-bar strong {
-  color: var(--gold-soft);
+  color: var(--inverse-accent, #F3D48E);
   font-weight: 600;
 }
 
@@ -470,8 +468,10 @@ small, .text-small {
 .switch-btn {
   background: transparent;
   border: none;
-  padding: 5px 10px;
-  font-size: 0.78rem;
+  padding: 8px 12px;
+  min-height: 36px;
+  min-width: 36px;
+  font-size: 0.82rem;
   font-weight: 600;
   color: var(--muted);
   border-radius: var(--radius-pill);
@@ -488,6 +488,10 @@ small, .text-small {
 
 .burger-btn {
   display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
   background: transparent;
   border: 1px solid var(--line);
   padding: 8px;
@@ -521,7 +525,7 @@ small, .text-small {
 
 .btn--primary {
   background-color: var(--berry);
-  color: #FFFFFF;
+  color: var(--on-accent, #FFFFFF);
   border-color: var(--berry);
   box-shadow: var(--shadow-l1), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
@@ -833,7 +837,7 @@ small, .text-small {
 
 .filter-pill.is-active {
   background-color: var(--berry);
-  color: #FFFFFF;
+  color: var(--on-accent, #FFFFFF);
   border-color: var(--berry);
   box-shadow: inset 0 1px 2px rgba(0,0,0,.06), var(--shadow-l1);
 }
@@ -898,22 +902,21 @@ small, .text-small {
   position: absolute;
   top: 14px;
   right: 14px;
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  text-transform: uppercase;
   padding: 4px 10px;
   border-radius: var(--radius-pill);
-  letter-spacing: 0.05em;
+  letter-spacing: 0.01em;
 }
 
 .cake__tag--bestseller {
   background-color: var(--gold);
-  color: #FFFFFF;
+  color: var(--on-gold, #1C120D);
 }
 
 .cake__tag--new {
   background-color: var(--berry);
-  color: #FFFFFF;
+  color: var(--on-accent, #FFFFFF);
 }
 
 .cake-card__body {
@@ -986,8 +989,8 @@ body.cur-iqd .price {
 .step__num {
   font-family: var(--font-serif);
   font-size: clamp(3rem, 6vw, 4.4rem);
-  font-weight: 700;
-  color: var(--blush);
+  font-weight: 600;
+  color: var(--berry);
   line-height: 1;
   margin-bottom: 8px;
   position: relative;
@@ -2365,8 +2368,8 @@ body.single-currency #mobileCurrencySwitcher {
 }
 
 .toast {
-  background-color: var(--cocoa);
-  color: #FFFFFF;
+  background-color: var(--inverse-bg, #2A201B);
+  color: var(--inverse-ink, #FFFBF7);
   padding: 12px 24px;
   border-radius: var(--radius-pill);
   font-size: 0.9rem;
@@ -3919,12 +3922,16 @@ html[dir="rtl"] .customer-drawer.is-open {
   z-index: 1;
 }
 
-/* Fix z-index for hero content to sit above background */
-.hero > .container,
-.hero-glow,
-.hero-deco {
+/* Hero content sits above the background photo; the glow stays absolutely
+   positioned so it never takes up space in the layout */
+.hero > .container {
   position: relative;
   z-index: 2;
+}
+
+.hero-glow,
+.hero-deco {
+  z-index: 1;
 }
 
 /* Fix hero card image */
@@ -3972,18 +3979,1406 @@ html[dir="rtl"] .customer-drawer.is-open {
 }
 
 /* Ensure body doesn't overflow horizontally on mobile */
+/* overflow-x: clip stops sideways scrolling without turning <body> into a scroll
+   container (overflow: hidden did, which silently broke the sticky header). */
 html, body {
   overflow-x: hidden;
-  max-width: 100vw; /* 100vw could cause scrollbars on Windows, but max-width: 100% handles that */
+  max-width: 100%;
+}
+
+@supports (overflow-x: clip) {
+  html, body {
+    overflow-x: clip;
+  }
 }
 
 /* Check any row or negative margins on mobile */
 .container { max-width: 100%; }
 
+/* ==========================================================================
+   Storefront structure layer
+   Page order, menu toolbar, order tray, and navigation states.
+   ========================================================================== */
+
+:root {
+  --header-h: 76px;
+  --tray-bg: #2A201B;
+  --tray-ink: #FFFBF7;
+  --tray-muted: rgba(255, 251, 247, 0.72);
+  --tray-line: rgba(255, 251, 247, 0.16);
+}
+
+html {
+  scroll-padding-top: calc(var(--header-h) + 12px);
+}
+
+/* Skip link: hidden until focused with the keyboard */
+.skip-link {
+  position: absolute;
+  top: 8px;
+  inset-inline-start: 8px;
+  z-index: 200;
+  padding: 10px 18px;
+  border-radius: var(--radius-pill);
+  background: var(--berry);
+  color: var(--on-accent, #FFFFFF);
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(-160%);
+  transition: transform 160ms ease;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* Header: keep the brand on one line and show where the reader is */
+.brand__name {
+  white-space: nowrap;
+}
+
+.nav__link.is-active {
+  color: var(--berry);
+  background-color: var(--shell);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.mobile-nav {
+  max-height: calc(100dvh - var(--header-h));
+  overflow-y: auto;
+  gap: 4px;
+}
+
+.mobile-nav .nav__link.is-active {
+  box-shadow: none;
+}
+
+.mobile-nav__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.mobile-nav__auth {
+  margin-top: 8px;
+}
+
+@media (max-width: 420px) {
+  /* The currency switch is also in the menu drawer; give the brand room */
+  .header__actions #headerCurrencySwitcher {
+    display: none !important;
+  }
+}
+
+/* Hero quote */
+.hero__quote {
+  margin: 12px 0 0;
+  padding: 14px 22px;
+  border-inline-start: 3px solid var(--berry);
+  background: var(--surface);
+  border-radius: 0 12px 12px 0;
+  max-width: 34rem;
+}
+
+[dir="rtl"] .hero__quote {
+  border-radius: 12px 0 0 12px;
+}
+
+.hero__quote-en {
+  font-size: 1.05rem;
+  font-weight: 500;
+  font-style: italic;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.hero__quote-ku {
+  font-family: var(--font-ku-body);
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--berry);
+  margin: 0;
+}
+
+@media (max-width: 959px) {
+  /* Lead with the message on small screens, then the photo */
+  .hero {
+    padding-top: 40px;
+    padding-bottom: 48px;
+  }
+  .hero__visual {
+    max-width: 420px;
+    width: 100%;
+    margin-inline: auto;
+  }
+  .hero__card {
+    aspect-ratio: 4 / 3;
+  }
+  .hero__quote {
+    text-align: start;
+    width: 100%;
+  }
+}
+
+/* Why-us strip now lives with the story: same surface, tighter spacing */
+.section--features {
+  padding-top: 0;
+}
+
+/* Menu toolbar: search, categories, sort and price read as one control */
+.menu-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 28px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-l1);
+}
+
+.menu-toolbar .menu-search-wrapper {
+  max-width: none;
+  margin: 0;
+}
+
+.menu-toolbar .menu-controls-bar {
+  margin-bottom: 0;
+}
+
+.menu-toolbar .menu-filters {
+  justify-content: flex-start;
+  margin-bottom: 0;
+}
+
+@media (min-width: 960px) {
+  .menu-toolbar .menu-category-controls {
+    margin-inline-end: auto;
+  }
+  .menu-toolbar .menu-controls-bar {
+    justify-content: flex-end;
+    gap: 16px;
+  }
+}
+
+@media (min-width: 960px) {
+  .menu-toolbar {
+    position: sticky;
+    top: calc(var(--header-h) + 8px);
+    z-index: 40;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  /* Keyboard shortcut hint is meaningless on touch screens */
+  .menu-search-kbd {
+    display: none;
+  }
+}
+
+@media (max-width: 959px) {
+  .menu-toolbar {
+    padding: 12px;
+    border-radius: var(--radius-card);
+  }
+}
+
+@media (max-width: 560px) {
+  /* One tap per category: swipeable pills instead of a dropdown */
+  .menu-toolbar .desktop-category-pills {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-inline: -12px;
+    padding-inline: 12px;
+    scroll-padding-inline: 12px;
+  }
+  .menu-toolbar .desktop-category-pills::-webkit-scrollbar {
+    display: none;
+  }
+  .menu-toolbar .filter-pill {
+    flex-shrink: 0;
+    padding: 8px 16px;
+  }
+  .menu-toolbar .mobile-category-wrap {
+    display: none;
+  }
+  .menu-toolbar .menu-dropdown-group {
+    flex-direction: row;
+    flex-wrap: nowrap;
+  }
+  .menu-toolbar .menu-select-wrapper {
+    flex: 1;
+    min-width: 0;
+  }
+  .menu-toolbar .menu-select {
+    width: 100%;
+  }
+  .menu-toolbar .menu-results-count {
+    text-align: start;
+  }
+}
+
+@media (max-width: 560px) {
+  /* Keep two-up cards scannable: short descriptions, aligned footers */
+  .cake-card__desc {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
+/* Cards already in the order */
+.cake-card.is-in-order {
+  border-color: var(--berry);
+}
+
+.cake-card__count {
+  position: absolute;
+  bottom: 10px;
+  inset-inline-start: 10px;
+  z-index: 2;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--berry);
+  color: var(--on-accent, #FFFFFF);
+  font-size: 0.74rem;
+  font-weight: 700;
+  box-shadow: var(--shadow-l1);
+}
+
+.cake-card__count[hidden] {
+  display: none;
+}
+
+/* Order tray: one dark bar, one bright action */
+.order-tray {
+  background-color: var(--tray-bg);
+  color: var(--tray-ink);
+  border: 1px solid var(--tray-line);
+  padding: 12px 14px 10px 18px;
+  gap: 6px;
+  max-width: 820px;
+}
+
+.order-tray__meta {
+  flex: 1;
+  cursor: pointer;
+  border-radius: 14px;
+}
+
+.tray-count-bubble {
+  background-color: var(--berry);
+  color: var(--on-accent, #FFFFFF);
+  box-shadow: 0 0 0 2px var(--tray-bg), 0 0 0 3px var(--tray-line);
+}
+
+.tray-total-text {
+  min-width: 0;
+}
+
+.tray-total-price {
+  color: var(--tray-ink);
+}
+
+.tray-preview-text {
+  color: var(--tray-muted);
+  max-width: 280px;
+}
+
+.order-tray__actions {
+  gap: 8px;
+}
+
+.tray-btn {
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  line-height: 1.2;
+  border-radius: var(--radius-pill);
+  padding: 10px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 160ms ease, border-color 160ms ease, opacity 160ms ease;
+}
+
+.tray-btn--quiet {
+  background: transparent;
+  color: var(--tray-ink);
+  border: 1px solid var(--tray-line);
+}
+
+.tray-btn--quiet:hover {
+  background: rgba(255, 251, 247, 0.08);
+  border-color: rgba(255, 251, 247, 0.32);
+}
+
+.tray-btn--send {
+  background: var(--berry);
+  color: var(--on-accent, #FFFFFF);
+  border: 1px solid transparent;
+  padding-inline: 20px;
+}
+
+.tray-btn--send:hover {
+  background: var(--berry-dark);
+}
+
+.tray-btn--send:disabled,
+.tray-btn--send.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.order-tray :focus-visible {
+  outline-color: var(--gold-soft);
+}
+
+.order-tray__note {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  color: var(--tray-muted);
+  text-align: center;
+}
+
+.tray-field {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tray-field__label {
+  display: block;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.85);
+  margin-bottom: 6px;
+}
+
+.tray-field__input {
+  width: 100%;
+  text-transform: none;
+}
+
+.tray-field__textarea {
+  min-height: 60px;
+  resize: vertical;
+}
+
+/* Leave room so the tray never covers the footer */
+body.has-order-tray {
+  padding-bottom: 120px;
+}
+
+@media (max-width: 560px) {
+  .order-tray {
+    background-color: var(--tray-bg);
+    padding: 12px;
+  }
+  .order-tray__main {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+      "meta meta details"
+      "clear send send";
+    align-items: center;
+    gap: 10px;
+  }
+  .order-tray__meta {
+    grid-area: meta;
+    justify-content: flex-start;
+  }
+  .order-tray__actions {
+    display: contents;
+  }
+  .order-tray__actions .tray-details-btn {
+    grid-area: details;
+  }
+  .order-tray__actions .tray-btn--quiet:not(.tray-details-btn) {
+    grid-area: clear;
+  }
+  .order-tray__actions .tray-btn--send {
+    grid-area: send;
+  }
+  .tray-preview-text {
+    max-width: 60vw;
+  }
+  body.has-order-tray {
+    padding-bottom: 150px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .order-tray,
+  .skip-link,
+  .cake-card-animate {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   v3 layer: semantic tokens, footer, accounts, editable tray, dialogs, panel
+   ========================================================================== */
+
+/* The hidden attribute always wins over component display rules */
+[hidden] {
+  display: none !important;
+}
+
+/* Inverse surfaces (announcement bar, toasts) stay dark with light text in both modes */
+:root {
+  --inverse-bg: #2A201B;
+  --inverse-ink: #FFFBF7;
+  --inverse-accent: #F3D48E;
+  --on-accent: #FFFFFF;
+  --on-gold: #1C120D;
+}
+
+[data-theme="dark"] {
+  --inverse-bg: #2E241E;
+  --inverse-ink: #F7EFE8;
+  --inverse-accent: #F3D48E;
+}
+
+/* ---------------------------------------------------------------- footer (fixes missing classes) */
+.footer__muted {
+  color: var(--footer-muted, rgba(255, 251, 247, 0.78));
+  margin-bottom: 12px;
+}
+
+.footer__phone {
+  color: var(--inverse-accent);
+  font-weight: 600;
+  text-decoration: none;
+  display: inline-block;
+  padding: 6px 0;
+}
+
+.footer__phone:hover,
+.footer__phone:focus-visible {
+  text-decoration: underline;
+}
+
+.footer__credit {
+  display: block;
+  margin-top: 4px;
+  opacity: 0.85;
+}
+
+.footer__staff-link {
+  color: var(--footer-muted, rgba(255, 251, 247, 0.78));
+  font-size: 0.84rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 10px 4px;
+}
+
+.footer__staff-link:hover {
+  color: var(--inverse-accent);
+}
+
+.site-footer :focus-visible {
+  outline-color: var(--inverse-accent);
+}
+
+.footer__links a {
+  display: inline-block;
+  padding: 6px 0;
+}
+
+/* ---------------------------------------------------------------- header between tablet and desktop */
+@media (min-width: 960px) and (max-width: 1099px) {
+  .header__nav,
+  .header__actions .switch-group,
+  #desktopAuthContainer {
+    display: none !important;
+  }
+  .burger-btn {
+    display: flex !important;
+  }
+}
+
+.auth-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-chip__name {
+  font-weight: 600;
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- touch targets */
+@media (pointer: coarse) {
+  .filter-pill,
+  .btn--sm,
+  .switch-btn,
+  .tray-btn {
+    min-height: 44px;
+  }
+  .btn--xs {
+    min-height: 40px;
+  }
+}
+
+/* ---------------------------------------------------------------- reviews */
+.review__quote {
+  margin: 0;
+  font-style: italic;
+  line-height: 1.7;
+  color: var(--ink);
+}
+
+.review__name {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.review__role {
+  color: var(--muted);
+}
+
+.reviews-empty {
+  text-align: center;
+  color: var(--muted);
+  grid-column: 1 / -1;
+}
+
+.stars {
+  color: #8A5A00;
+}
+
+[data-theme="dark"] .stars {
+  color: var(--gold);
+  background: rgba(229, 184, 92, 0.12);
+}
+
+/* ---------------------------------------------------------------- editable tray */
+.order-tray__meta {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  padding: 4px;
+}
+
+.order-tray__meta:focus-visible {
+  outline: 2px solid var(--inverse-accent);
+  outline-offset: 2px;
+}
+
+.tray-total-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.order-tray.is-expanded {
+  max-height: calc(100dvh - 24px);
+}
+
+.tray-breakdown {
+  max-height: min(62vh, 560px);
+}
+
+.tray-lines {
+  list-style: none;
+  margin: 4px 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tray-line {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--tray-line);
+}
+
+.tray-line__info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tray-line__name {
+  font-weight: 600;
+  color: var(--tray-ink);
+}
+
+.tray-line__custom,
+.tray-line__unit {
+  font-size: 0.8rem;
+  color: var(--tray-muted);
+}
+
+.tray-line__qty {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--tray-line);
+  border-radius: var(--radius-pill);
+  padding: 2px;
+}
+
+.qty-btn,
+.tray-line__remove {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 0;
+  background: transparent;
+  color: var(--tray-ink);
+  font-size: 1.15rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.qty-btn:hover,
+.tray-line__remove:hover {
+  background: rgba(255, 251, 247, 0.1);
+}
+
+.qty-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.qty-btn:focus-visible,
+.tray-line__remove:focus-visible,
+.tray-btn:focus-visible {
+  outline: 2px solid var(--inverse-accent);
+  outline-offset: 2px;
+}
+
+.qty-value {
+  min-width: 2ch;
+  text-align: center;
+  font-weight: 700;
+  color: var(--tray-ink);
+}
+
+.tray-line__total {
+  font-weight: 700;
+  color: var(--tray-ink);
+  min-width: 7ch;
+  text-align: end;
+}
+
+.tray-line__remove {
+  font-size: 0.95rem;
+  color: var(--tray-muted);
+}
+
+@media (pointer: coarse) {
+  .qty-btn,
+  .tray-line__remove {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (max-width: 420px) {
+  .tray-line {
+    grid-template-columns: 1fr auto auto;
+    grid-template-areas:
+      "info info remove"
+      "qty total total";
+  }
+  .tray-line__info { grid-area: info; }
+  .tray-line__qty { grid-area: qty; justify-self: start; }
+  .tray-line__total { grid-area: total; }
+  .tray-line__remove { grid-area: remove; }
+}
+
+.tray-breakdown-row--discount span:last-child,
+.tray-breakdown-row--free span:last-child {
+  color: #86EFAC;
+  font-weight: 700;
+}
+
+.tray-promo-applied {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #86EFAC;
+  font-weight: 600;
+  font-size: 0.86rem;
+}
+
+.tray-promo-feedback[data-state="error"] {
+  color: #FCA5A5;
+}
+
+.tray-btn--small {
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.tray-details {
+  border: 0;
+  margin: 12px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--tray-line);
+}
+
+.tray-details__legend {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  color: var(--inverse-accent);
+  padding: 0;
+  margin-bottom: 4px;
+}
+
+.tray-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (max-width: 560px) {
+  .tray-field-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tray-details .tray-field {
+  margin-top: 10px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.tray-field__input {
+  min-height: 44px;
+  font-size: 1rem;
+  color-scheme: dark;
+}
+
+.tray-field__input[aria-invalid="true"] {
+  border-color: #FCA5A5;
+  box-shadow: 0 0 0 2px rgba(252, 165, 165, 0.35);
+}
+
+.tray-field__hint {
+  font-size: 0.8rem;
+  color: var(--tray-muted);
+  margin: 6px 0 0;
+}
+
+.tray-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 0.86rem;
+  color: var(--tray-ink);
+  min-height: 44px;
+}
+
+.tray-check input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--berry);
+}
+
+.tray-error {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.18);
+  border: 1px solid rgba(252, 165, 165, 0.5);
+  color: #FEE2E2;
+  font-size: 0.88rem;
+}
+
+.tray-min-notice {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.18);
+  color: #FEE2E2;
+  font-size: 0.84rem;
+}
+
+.tray-sent {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(134, 239, 172, 0.12);
+  border: 1px solid rgba(134, 239, 172, 0.35);
+  color: var(--tray-ink);
+  font-size: 0.88rem;
+}
+
+.tray-sent p {
+  margin: 0 0 8px;
+  color: var(--tray-ink);
+}
+
+.tray-sent__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tray-guest-notice {
+  margin: 10px 0 0;
+  font-size: 0.8rem;
+  color: var(--tray-muted);
+}
+
+/* ---------------------------------------------------------------- notices */
+.sync-notice {
+  position: fixed;
+  top: 12px;
+  inset-inline-end: 12px;
+  z-index: 140;
+  margin: 0;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--inverse-bg);
+  color: var(--inverse-ink);
+  font-size: 0.86rem;
+  box-shadow: var(--shadow-l3);
+}
+
+.toast--warning {
+  background-color: #92400E;
+  color: #FFFBEB;
+}
+
+/* ---------------------------------------------------------------- dialogs */
+.modal-window--narrow {
+  max-width: 440px;
+}
+
+.modal-lead {
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+
+.modal-footnote {
+  font-size: 0.86rem;
+  color: var(--muted);
+  margin: 16px 0 0;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+.btn--block {
+  width: 100%;
+}
+
+.btn--danger {
+  background-color: #B91C1C;
+  border-color: #B91C1C;
+  color: #FFFFFF;
+}
+
+.btn--danger-outline {
+  color: #B91C1C;
+  border-color: #FCA5A5;
+}
+
+[data-theme="dark"] .btn--danger-outline {
+  color: #FCA5A5;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.auth-message {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  background: #FEF2F2;
+  color: #991B1B;
+  border: 1px solid #FECACA;
+}
+
+.auth-message[data-type="info"] {
+  background: var(--shell);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+[data-theme="dark"] .auth-message {
+  background: rgba(239, 68, 68, 0.16);
+  color: #FECACA;
+  border-color: rgba(252, 165, 165, 0.4);
+}
+
+.rating-field {
+  border: 0;
+  padding: 0;
+}
+
+.rating-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rating-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  color: #8A5A00;
+  cursor: pointer;
+  min-height: 40px;
+}
+
+[data-theme="dark"] .rating-options label {
+  color: var(--gold);
+}
+
+.rating-options label:has(input:checked) {
+  border-color: var(--berry);
+  background: var(--shell);
+}
+
+.perm-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.perm-grid label,
+.customize-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+}
+
+.customize-options {
+  border: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.customize-product {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+body.has-dialog {
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------- control panel */
+.panel-header-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.panel-save-status {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.panel-save-status[data-state="saved"] { color: #15803D; }
+.panel-save-status[data-state="failed"] { color: #B91C1C; }
+[data-theme="dark"] .panel-save-status[data-state="saved"] { color: #86EFAC; }
+[data-theme="dark"] .panel-save-status[data-state="failed"] { color: #FCA5A5; }
+
+.panel-tab-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.panel-tab-title {
+  font-family: var(--font-serif);
+  margin: 0 0 8px;
+}
+
+.panel-tab-tools {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.form-input--compact {
+  padding: 8px 12px;
+  font-size: 0.88rem;
+  width: auto;
+  min-width: 180px;
+}
+
+.panel-hint,
+.form-hint {
+  font-size: 0.84rem;
+  color: var(--muted);
+  margin: 0 0 12px;
+  display: block;
+}
+
+.panel-muted {
+  color: var(--muted);
+}
+
+.panel-callout {
+  border: 1px solid var(--line);
+  background: var(--shell);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  font-size: 0.86rem;
+}
+
+.panel-callout p {
+  margin: 0 0 6px;
+}
+
+.panel-callout code {
+  font-size: 0.86rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+
+.panel-table__empty {
+  text-align: center;
+  padding: 28px;
+  color: var(--muted);
+}
+
+.panel-table__actions {
+  text-align: end;
+  white-space: nowrap;
+}
+
+.panel-money {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.editor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.danger-title {
+  color: #B91C1C;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+[data-theme="dark"] .danger-title {
+  color: #FCA5A5;
+}
+
+.moderation {
+  margin-bottom: 28px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.moderation-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  background: var(--surface);
+}
+
+.moderation-card[data-status="approved"] { border-inline-start: 4px solid #15803D; }
+.moderation-card[data-status="rejected"] { border-inline-start: 4px solid #B91C1C; opacity: 0.8; }
+
+.moderation-card__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.moderation-card__text {
+  margin: 8px 0;
+  white-space: pre-wrap;
+}
+
+.moderation-card__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.moderation-history summary {
+  cursor: pointer;
+  padding: 8px 0;
+  font-weight: 600;
+}
+
+.drawer-order {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--surface);
+}
+
+.drawer-order__head,
+.drawer-order__foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.drawer-order__id { font-weight: 700; font-size: 0.86rem; }
+.drawer-order__date,
+.drawer-order__meta { font-size: 0.8rem; color: var(--muted); }
+.drawer-order__items { font-size: 0.88rem; line-height: 1.5; margin: 8px 0; }
+.drawer-order__foot { padding-top: 8px; border-top: 1px dashed var(--line); margin-top: 8px; }
+.drawer-order__status { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; }
+
+.customer-drawer-title {
+  margin: 0;
+  font-family: var(--font-serif);
+}
+
+/* Economy live preview: totals in ink, not low-contrast gold */
+.economy-preview-total-value {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------- history */
+.history-scope {
+  font-size: 0.84rem;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+
+.history-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 480px) {
+  .history-stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+.history-stat-val--text {
+  font-size: 0.95rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- RTL details */
+[dir="rtl"] .tray-line__total {
+  text-align: start;
+}
+
+[dir="rtl"] .qty-btn,
+[dir="rtl"] .qty-value {
+  font-family: var(--font-body);
+}
+
+.economy-preview-secondary {
+  font-size: 0.88rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.economy-preview-rounding {
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-align: end;
+  margin-top: 2px;
+}
+
+/* Story caption stays readable whether or not the photo has loaded */
+.story__caption {
+  background: rgba(28, 18, 13, 0.74);
+  border-radius: 14px;
+  padding: 14px 18px;
+  color: #FFFBF7;
+}
+
+.story__caption .card__title,
+.story__caption p {
+  color: #FFFBF7 !important;
+}
+
+/* Contact links follow the card's text colour in both modes */
+#infoContact a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  display: inline-block;
+  padding: 4px 0;
+}
+
+#infoContact a:hover {
+  color: var(--berry);
+}
+
+/* Header: labels never wrap; tighten spacing before the desktop layout runs out of room */
+.nav__link,
+.switch-btn,
+.header__actions .btn {
+  white-space: nowrap;
+}
+
+@media (min-width: 1100px) and (max-width: 1365px) {
+  .brand__tagline {
+    display: none;
+  }
+  .header__inner {
+    gap: 12px;
+  }
+  .header__nav {
+    gap: 0;
+  }
+  .nav__link {
+    padding: 8px 9px;
+    font-size: 0.88rem;
+  }
+  .header__actions {
+    gap: 6px;
+  }
+  .switch-btn {
+    padding: 8px 9px;
+  }
+}
+
+/* ---------------------------------------------------------------- account menu */
+.account-menu {
+  position: relative;
+}
+
+.account-menu__toggle {
+  gap: 8px;
+}
+
+.account-menu__list {
+  position: absolute;
+  inset-inline-end: 0;
+  top: calc(100% + 8px);
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-l3);
+  z-index: 95;
+}
+
+.account-menu__item {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  min-height: 44px;
+  text-align: start;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.account-menu__item:hover,
+.account-menu__item:focus-visible {
+  background: var(--shell);
+}
+
+.user-chip--stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  border-radius: 16px;
+  padding: 12px;
+}
+
+.user-chip__who,
+.user-chip__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
   </style>
-  <script type="module" crossorigin src="./assets/index-Byunrzho.js"></script>
+  <script type="module" crossorigin src="./assets/index-ZCy0Eh5H.js"></script>
 </head>
 <body>
+  <a class="skip-link" href="#menu" data-i18n="skipToMenu">Skip to the menu</a>
+
   <!-- Announcement Bar -->
   <aside class="announcement-bar" id="announcementBar" role="region" aria-label="Store Announcement">
     <span id="announcementText" data-i18n="announcementText">Pre-order for weekend celebrations! <strong>Free local delivery</strong> on orders over $50.</span>
@@ -3993,7 +5388,7 @@ html, body {
   <header class="site-header" id="mainHeader">
     <div class="container header__inner">
       <!-- Brand Logo -->
-      <a href="#hero" class="header__brand" id="headerBrandLink" aria-label="Yummy Sweets Homepage">
+      <a href="#hero" class="header__brand" id="headerBrandLink">
         <span class="logo__icon logo__mark" id="headerLogoIcon" data-logo>🎂</span>
         <div class="brand__text">
           <span class="brand__name" id="headerShopName">Yummy Sweets</span>
@@ -4007,8 +5402,8 @@ html, body {
         <a href="#how-it-works" class="nav__link" data-i18n="navHowItWorks">How It Works</a>
         <a href="#story" class="nav__link" data-i18n="navOurStory">Our Story</a>
         <a href="#reviews" class="nav__link" data-i18n="navReviews">Reviews</a>
-        <a href="#contact" class="nav__link" data-i18n="navContact">Contact</a>
         <a href="#faq" class="nav__link" data-i18n="navFaq">FAQ</a>
+        <a href="#contact" class="nav__link" data-i18n="navContact">Contact</a>
       </nav>
 
       <!-- Header Controls & Auth -->
@@ -4051,10 +5446,10 @@ html, body {
     <a href="#how-it-works" class="nav__link" onclick="app.closeMobileMenu()" data-i18n="navHowItWorks">How It Works</a>
     <a href="#story" class="nav__link" onclick="app.closeMobileMenu()" data-i18n="navOurStory">Our Story</a>
     <a href="#reviews" class="nav__link" onclick="app.closeMobileMenu()" data-i18n="navReviews">Reviews</a>
-    <a href="#contact" class="nav__link" onclick="app.closeMobileMenu()" data-i18n="navContact">Contact</a>
     <a href="#faq" class="nav__link" onclick="app.closeMobileMenu()" data-i18n="navFaq">FAQ</a>
+    <a href="#contact" class="nav__link" onclick="app.closeMobileMenu()" data-i18n="navContact">Contact</a>
 
-    <div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap;">
+    <div class="mobile-nav__controls">
       <div class="switch-group" role="group" aria-label="Language Selector">
         <button type="button" class="switch-btn" id="btnLangEnMobile" onclick="app.setLanguage('en')">EN</button>
         <button type="button" class="switch-btn" id="btnLangKuMobile" onclick="app.setLanguage('ku')">کوردی</button>
@@ -4070,7 +5465,7 @@ html, body {
       </div>
     </div>
 
-    <div id="mobileAuthContainer" style="margin-top:8px;">
+    <div id="mobileAuthContainer" class="mobile-nav__auth">
       <!-- Populated dynamically by app.updateAuthUI() -->
     </div>
   </nav>
@@ -4078,7 +5473,7 @@ html, body {
   <main id="mainContent">
     <!-- Hero Section -->
     <section class="section hero" id="hero">
-      <img class="hero-bg-img" src="https://images.unsplash.com/photo-1509440159596-0249088772ff?w=1800&auto=format&fit=crop&q=80" alt="" aria-hidden="true" referrerpolicy="no-referrer" onerror="this.style.display='none';" />
+      <img class="hero-bg-img" src="https://images.unsplash.com/photo-1509440159596-0249088772ff?w=1200&amp;auto=format&amp;fit=crop&amp;q=75" srcset="https://images.unsplash.com/photo-1509440159596-0249088772ff?w=640&amp;auto=format&amp;fit=crop&amp;q=75 640w, https://images.unsplash.com/photo-1509440159596-0249088772ff?w=960&amp;auto=format&amp;fit=crop&amp;q=75 960w, https://images.unsplash.com/photo-1509440159596-0249088772ff?w=1200&amp;auto=format&amp;fit=crop&amp;q=75 1200w, https://images.unsplash.com/photo-1509440159596-0249088772ff?w=1800&amp;auto=format&amp;fit=crop&amp;q=75 1800w" sizes="100vw" width="1800" height="1200" alt="" aria-hidden="true" fetchpriority="high" decoding="async" referrerpolicy="no-referrer" onerror="this.style.display='none';" />
       <div class="hero-bg-veil" aria-hidden="true"></div>
       <div class="hero-glow" aria-hidden="true"></div>
       <div class="container hero__grid">
@@ -4105,14 +5500,14 @@ html, body {
               <span data-i18n="trust3">Custom Messages</span>
             </div>
           </div>
-          <div class="hero__quote" style="margin-top: 32px; padding: 16px 24px; border-left: 3px solid var(--berry); background: var(--surface); opacity: 0.95; border-radius: 0 12px 12px 0;">
-            <p style="font-size: 1.1rem; font-weight: 500; font-style: italic; color: var(--ink); margin-bottom: 8px;">"Life is short, make it sweet."</p>
-            <p style="font-size: 1.2rem; font-weight: 600; color: var(--berry); font-family: 'Vazirmatn', sans-serif;">"ژیان کورتە، با شیرین بێت."</p>
-          </div>
+          <figure class="hero__quote">
+            <p class="hero__quote-en" lang="en">"Life is short, make it sweet."</p>
+            <p class="hero__quote-ku" lang="ckb" dir="rtl">"ژیان کورتە، با شیرین بێت."</p>
+          </figure>
         </div>
         <div class="hero__visual">
           <div class="hero__card">
-            <img src="https://images.unsplash.com/photo-1535141192574-5d4897c12636?w=900&auto=format&fit=crop&q=80" alt="Artisan celebration cake" class="hero__img" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='flex';" />
+            <img src="https://images.unsplash.com/photo-1535141192574-5d4897c12636?w=900&amp;auto=format&amp;fit=crop&amp;q=80" srcset="https://images.unsplash.com/photo-1535141192574-5d4897c12636?w=480&amp;auto=format&amp;fit=crop&amp;q=80 480w, https://images.unsplash.com/photo-1535141192574-5d4897c12636?w=720&amp;auto=format&amp;fit=crop&amp;q=80 720w, https://images.unsplash.com/photo-1535141192574-5d4897c12636?w=900&amp;auto=format&amp;fit=crop&amp;q=80 900w" sizes="(max-width: 959px) 90vw, 40vw" width="900" height="900" alt="Artisan celebration cake" class="hero__img" decoding="async" referrerpolicy="no-referrer" onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='flex';" />
             <div class="hero__cake-emoji" aria-label="Celebration Cake Illustration" style="display:none;">🎂</div>
           </div>
 
@@ -4124,32 +5519,6 @@ html, body {
       </div>
     </section>
 
-    <div class="section-divider"></div>
-
-    <!-- Features Section -->
-    <section class="section section--shell" id="features">
-      <div class="container">
-        <div class="features-grid">
-          <div class="feature-card">
-            <div class="feature-icon-tile"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg></div>
-            <h3 class="feature-card__title" data-i18n="feat1Title">Real Ingredients</h3>
-            <p data-i18n="feat1Desc">Pure butter, Belgian chocolate, fresh seasonal berries, and zero artificial preservatives.</p>
-          </div>
-
-          <div class="feature-card">
-            <div class="feature-icon-tile"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13" rx="1"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></div>
-            <h3 class="feature-card__title" data-i18n="feat2Title">Careful Delivery</h3>
-            <p data-i18n="feat2Desc">Handled with gentle temperature-controlled care so your cake arrives picture-perfect.</p>
-          </div>
-
-          <div class="feature-card">
-            <div class="feature-icon-tile"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></div>
-            <h3 class="feature-card__title" data-i18n="feat3Title">Custom Creations</h3>
-            <p data-i18n="feat3Desc">Bespoke tiers, customized chocolate writing, and tailored sweetness for every milestone.</p>
-          </div>
-        </div>
-      </div>
-    </section>
 
     <!-- Menu Section -->
     <section class="section" id="menu">
@@ -4160,6 +5529,7 @@ html, body {
           <p class="lead" data-i18n="menuLead">Browse our signature cakes, cupcakes, and desserts. Click 'Add to Order' to assemble your WhatsApp cart.</p>
         </div>
 
+        <div class="menu-toolbar" id="menuToolbar">
         <!-- Storefront Menu Search Bar (Section 7.8) -->
         <div class="menu-search-wrapper" role="search">
           <div class="menu-search-bar">
@@ -4181,10 +5551,10 @@ html, body {
           <!-- Category Filter: Pills on Desktop, Select on Mobile -->
           <div class="menu-category-controls">
             <div class="menu-filters desktop-category-pills" role="group" aria-label="Filter cakes by category">
-              <button type="button" class="filter-pill is-active" id="filter-all" onclick="app.setCategory('all')" data-i18n="catAll">All Sweets</button>
-              <button type="button" class="filter-pill" id="filter-cakes" onclick="app.setCategory('cakes')" data-i18n="catCakes">Layer Cakes</button>
-              <button type="button" class="filter-pill" id="filter-cupcakes" onclick="app.setCategory('cupcakes')" data-i18n="catCupcakes">Cupcakes</button>
-              <button type="button" class="filter-pill" id="filter-desserts" onclick="app.setCategory('desserts')" data-i18n="catDesserts">Desserts</button>
+              <button type="button" class="filter-pill is-active" id="filter-all" aria-pressed="true" onclick="app.setCategory('all')" data-i18n="catAll">All Sweets</button>
+              <button type="button" class="filter-pill" id="filter-cakes" aria-pressed="false" onclick="app.setCategory('cakes')" data-i18n="catCakes">Layer Cakes</button>
+              <button type="button" class="filter-pill" id="filter-cupcakes" aria-pressed="false" onclick="app.setCategory('cupcakes')" data-i18n="catCupcakes">Cupcakes</button>
+              <button type="button" class="filter-pill" id="filter-desserts" aria-pressed="false" onclick="app.setCategory('desserts')" data-i18n="catDesserts">Desserts</button>
             </div>
             <div class="mobile-category-wrap">
               <select id="mobileCategorySelect" class="form-select mobile-category-select" onchange="app.setCategory(this.value)" aria-label="Filter category">
@@ -4226,9 +5596,10 @@ html, body {
             <!-- Dynamic: Showing X of Y cakes -->
           </div>
         </div>
+        </div>
 
         <!-- Dynamic Menu Grid -->
-        <div class="menu-grid" id="menuGrid" role="region" aria-live="polite">
+        <div class="menu-grid" id="menuGrid" role="region" aria-label="Menu items">
           <!-- Rendered dynamically by app.renderMenu() -->
         </div>
       </div>
@@ -4247,19 +5618,19 @@ html, body {
 
         <div class="steps-grid">
           <div class="step-card">
-            <div class="step__num">01</div>
+            <div class="step__num" aria-hidden="true">01</div>
             <h3 class="step-card__title" data-i18n="step1Title">Choose Your Favorites</h3>
             <p data-i18n="step1Desc">Browse our menu and pick the cakes, cupcakes, or desserts you'd love to share with loved ones.</p>
           </div>
 
           <div class="step-card">
-            <div class="step__num">02</div>
+            <div class="step__num" aria-hidden="true">02</div>
             <h3 class="step-card__title" data-i18n="step2Title">Send Via WhatsApp</h3>
             <p data-i18n="step2Desc">Click Send Order to open an instant pre-formatted WhatsApp message directly to our head baker.</p>
           </div>
 
           <div class="step-card">
-            <div class="step__num">03</div>
+            <div class="step__num" aria-hidden="true">03</div>
             <h3 class="step-card__title" data-i18n="step3Title">Confirm & Celebrate</h3>
             <p data-i18n="step3Desc">We confirm your delivery slot or pickup time, bake fresh that morning, and deliver to your door.</p>
           </div>
@@ -4272,7 +5643,7 @@ html, body {
       <div class="container">
         <div class="story__grid">
           <div class="story__visual story__visual--photo">
-            <img src="https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=900&auto=format&fit=crop&q=80" alt="Our artisan bakery kitchen" class="story__img" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='flex';" />
+            <img src="https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=900&amp;auto=format&amp;fit=crop&amp;q=80" srcset="https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=480&amp;auto=format&amp;fit=crop&amp;q=80 480w, https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=720&amp;auto=format&amp;fit=crop&amp;q=80 720w, https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=900&amp;auto=format&amp;fit=crop&amp;q=80 900w" sizes="(max-width: 959px) 90vw, 45vw" width="900" height="1100" alt="Our artisan bakery kitchen" class="story__img" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='flex';" />
             <div class="story__emoji" aria-label="Kitchen Flour & Baker Hat" style="display:none;">👩‍🍳</div>
             <div class="story__caption">
               <h3 class="card__title" style="margin-bottom:6px;" data-i18n="storyImgTitle">Sweet Artisan Heritage</h3>
@@ -4301,6 +5672,31 @@ html, body {
                 <span data-i18n="bullet3">Dedicated pastry artisans with European techniques</span>
               </li>
             </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="section section--features" id="features" aria-label="Why customers choose us">
+      <div class="container">
+        <div class="features-grid">
+          <div class="feature-card">
+            <div class="feature-icon-tile"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg></div>
+            <h3 class="feature-card__title" data-i18n="feat1Title">Real Ingredients</h3>
+            <p data-i18n="feat1Desc">Pure butter, Belgian chocolate, fresh seasonal berries, and zero artificial preservatives.</p>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon-tile"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13" rx="1"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></div>
+            <h3 class="feature-card__title" data-i18n="feat2Title">Careful Delivery</h3>
+            <p data-i18n="feat2Desc">Handled with gentle temperature-controlled care so your cake arrives picture-perfect.</p>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon-tile"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></div>
+            <h3 class="feature-card__title" data-i18n="feat3Title">Custom Creations</h3>
+            <p data-i18n="feat3Desc">Bespoke tiers, customized chocolate writing, and tailored sweetness for every milestone.</p>
           </div>
         </div>
       </div>
@@ -4371,7 +5767,7 @@ html, body {
           <div class="info-card">
             <div class="info-card__icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 8.5-8.5 8.38 8.38 0 0 1 3.8.9 8.5 8.5 0 0 1 4.7 7.6z"/></svg></div>
             <h3 class="card__title" data-i18n="cardContactTitle">Direct Contact</h3>
-            <p class="text-small" id="infoContact">WhatsApp: +15551234567<br/>hello@yummysweets.com<br/>+964 750 123 4567</p>
+            <p class="text-small" id="infoContact"></p>
           </div>
         </div>
       </div>
@@ -4379,65 +5775,96 @@ html, body {
   </main>
 
   <!-- Sticky Order Tray -->
-  <aside class="order-tray" id="orderTray" role="region" aria-live="polite" aria-label="Selected Cake Order Tray">
-    <!-- Expandable Breakdown Drawer -->
-    <div class="tray-breakdown" id="trayBreakdown" style="display:none;">
+  <aside class="order-tray" id="orderTray" aria-labelledby="trayHeading">
+    <h2 class="sr-only" id="trayHeading" data-i18n="trayHeading">Your order</h2>
+
+    <!-- Expandable details: editable lines, totals, checkout details -->
+    <div class="tray-breakdown" id="trayBreakdown" hidden>
       <div class="tray-breakdown__header">
-        <span class="tray-breakdown__title" data-i18n="economyPreview">Order Breakdown</span>
-        <button type="button" class="tray-breakdown__close" onclick="app.toggleTrayBreakdown()" aria-label="Close breakdown">✕</button>
+        <span class="tray-breakdown__title" data-i18n="trayYourOrder">Your order</span>
+        <button type="button" class="tray-breakdown__close" onclick="app.toggleTrayBreakdown(false)" aria-controls="trayBreakdown" aria-expanded="false" aria-label="Close order details" data-i18n-aria="trayCloseDetails">✕</button>
       </div>
-      <div class="tray-breakdown__lines" id="trayBreakdownLines">
-        <!-- Injected dynamically by app.renderTray() -->
-      </div>
-      <!-- Promo Code Field -->
-      <div class="tray-promo-box" id="trayPromoArea">
-        <div class="tray-promo-row">
-          <input type="text" id="trayPromoInput" class="tray-promo-input" placeholder="Promo code..." maxlength="20" onkeydown="if(event.key==='Enter'){event.preventDefault();app.applyCartPromo();}" />
-          <button type="button" class="btn btn--xs btn--primary" id="btnApplyPromo" onclick="app.applyCartPromo()" data-i18n="trayApplyPromo">Apply</button>
+
+      <ul class="tray-lines" id="trayLines" aria-label="Items in your order" data-i18n-aria="trayItemsListLabel"></ul>
+
+      <div class="tray-breakdown__lines" id="trayBreakdownLines"></div>
+
+      <div class="tray-promo-box" id="trayPromoArea" hidden></div>
+
+      <fieldset class="tray-details">
+        <legend class="tray-details__legend" data-i18n="checkoutDetailsLegend">Your details</legend>
+        <div class="tray-field">
+          <label for="trayCustName" class="tray-field__label" data-i18n="checkoutNameLabel">Name *</label>
+          <input type="text" id="trayCustName" class="tray-promo-input tray-field__input" autocomplete="name" maxlength="80" required />
         </div>
-        <div id="trayPromoFeedback" class="tray-promo-feedback"></div>
-      </div>
-      <!-- Order Note Field -->
-      <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
-        <label for="trayFulfillmentDate" style="display:block; font-size: 0.82rem; color: rgba(255, 255, 255, 0.85); margin-bottom: 6px;">Requested Delivery/Pickup Date & Time *</label>
-        <input type="datetime-local" id="trayFulfillmentDate" class="tray-promo-input" style="width:100%;" required />
-      </div>
-      <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
-        <label for="trayOrderNote" style="display:block; font-size: 0.82rem; color: rgba(255, 255, 255, 0.85); margin-bottom: 6px;" data-i18n="orderNoteLabel">Note for the baker (optional)</label>
-        <textarea id="trayOrderNote" class="tray-promo-input" style="width:100%; min-height: 60px; resize: vertical;" maxlength="300" placeholder="e.g. &quot;Happy birthday Sara&quot; or &quot;leave at the door&quot;" data-i18n-placeholder="orderNotePlaceholder" oninput="app.orderNote = this.value;"></textarea>
-      </div>
+        <div class="tray-field-row">
+          <div class="tray-field">
+            <label for="trayCustPhone" class="tray-field__label" data-i18n="checkoutPhoneLabel">Phone (optional)</label>
+            <input type="tel" id="trayCustPhone" class="tray-promo-input tray-field__input" autocomplete="tel" inputmode="tel" maxlength="32" dir="ltr" />
+          </div>
+          <div class="tray-field">
+            <label for="trayFulfillmentDate" class="tray-field__label" data-i18n="trayDateLabel">Delivery or pickup date and time *</label>
+            <input type="datetime-local" id="trayFulfillmentDate" class="tray-promo-input tray-field__input" required aria-describedby="trayDateHint" />
+          </div>
+        </div>
+        <p class="tray-field__hint" id="trayDateHint"></p>
+        <div class="tray-field">
+          <label for="trayCustAddress" class="tray-field__label" data-i18n="checkoutAddressOptional">Delivery address (optional for pickup)</label>
+          <textarea id="trayCustAddress" class="tray-promo-input tray-field__input tray-field__textarea" autocomplete="street-address" maxlength="300" rows="2"></textarea>
+        </div>
+        <div class="tray-field">
+          <label for="trayOrderNote" class="tray-field__label" data-i18n="orderNoteLabel">Note for the baker (optional)</label>
+          <textarea id="trayOrderNote" class="tray-promo-input tray-field__input tray-field__textarea" maxlength="300" rows="2" placeholder="e.g. &quot;Happy birthday Sara&quot;" data-i18n-placeholder="orderNotePlaceholder"></textarea>
+        </div>
+        <label class="tray-check">
+          <input type="checkbox" id="trayRememberDetails" />
+          <span data-i18n="checkoutRemember">Remember my details on this device</span>
+        </label>
+      </fieldset>
+
+      <p class="tray-error" id="trayCheckoutError" role="alert" hidden></p>
+      <p class="tray-guest-notice" id="trayGuestNotice" hidden data-i18n="orderSignInToSave">Sign in to keep this order in your history on every device.</p>
     </div>
 
-    <!-- Minimum Order Warning Notice Banner -->
-    <div class="tray-min-notice" id="trayMinOrderNotice" style="display:none;"></div>
+    <!-- Minimum order warning -->
+    <p class="tray-min-notice" id="trayMinOrderNotice" role="status" hidden></p>
+
+    <!-- After WhatsApp opens: the order is not cleared until the customer says so -->
+    <div class="tray-sent" id="traySentNotice" role="status" hidden>
+      <p id="traySentText"></p>
+      <div class="tray-sent__actions">
+        <a class="tray-btn tray-btn--quiet tray-btn--small" id="traySentLink" href="#" target="_blank" rel="noopener noreferrer" data-i18n="checkoutOpenAgain">Open WhatsApp</a>
+        <button type="button" class="tray-btn tray-btn--quiet tray-btn--small" onclick="app.finishSentOrder()" data-i18n="checkoutDoneClear">I sent it — clear the tray</button>
+      </div>
+    </div>
 
     <div class="order-tray__main">
-      <div class="order-tray__meta" onclick="app.toggleTrayBreakdown()" role="button" tabindex="0" aria-label="Toggle order breakdown details">
-        <div class="tray-count-bubble" id="trayItemCount">0</div>
-        <div class="tray-total-text">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <button type="button" class="order-tray__meta" onclick="app.toggleTrayBreakdown()" aria-controls="trayBreakdown" aria-expanded="false">
+        <span class="tray-count-bubble" id="trayItemCount">0</span>
+        <span class="tray-total-text">
+          <span class="tray-total-row">
             <span class="tray-total-price" id="trayTotalPrice">$0.00</span>
-            <span id="trayFreeDeliveryBadge" class="tray-badge-free" style="display:none;" data-i18n="freeDelivery">Free</span>
-          </div>
-          <span class="tray-preview-text" id="trayPreviewText" data-i18n="trayEmptyPreview">No items selected</span>
-          <div class="tray-guest-notice" id="trayGuestNotice" style="display:none;" data-i18n="orderSignInToSave">Sign in to save this order to your history.</div>
-        </div>
-      </div>
+            <span id="trayFreeDeliveryBadge" class="tray-badge-free" hidden data-i18n="freeDelivery">Free</span>
+          </span>
+          <span class="tray-preview-text" id="trayPreviewText"></span>
+        </span>
+      </button>
 
       <div class="order-tray__actions">
-        <button type="button" class="btn btn--ghost btn--sm tray-details-btn" id="btnTrayToggle" onclick="app.toggleTrayBreakdown()" aria-expanded="false">
+        <button type="button" class="tray-btn tray-btn--quiet tray-details-btn" id="btnTrayToggle" onclick="app.toggleTrayBreakdown()" aria-expanded="false" aria-controls="trayBreakdown">
           <span id="trayToggleLabel" data-i18n="trayDetails">Details ▾</span>
         </button>
-        <button type="button" class="btn btn--ghost btn--sm" style="color:#FFFFFF;border-color:rgba(255,255,255,0.25);" onclick="app.clearOrder()" data-i18n="trayClear">Clear</button>
-        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
-          <p style="font-size: 0.72rem; color: rgba(255,255,255,0.7); text-align: right; margin: 0; line-height: 1.2;">Payment via Cash on Delivery. Fee calculated on WhatsApp.</p>
-          <button type="button" class="btn btn--primary btn--sm" id="btnTrayWhatsApp" onclick="app.checkoutWhatsApp()" data-i18n="traySendWhatsApp">Send Order via WhatsApp</button>
-        </div>
+        <button type="button" class="tray-btn tray-btn--quiet" onclick="app.clearOrder()" data-i18n="trayClear">Clear</button>
+        <button type="button" class="tray-btn tray-btn--send" id="btnTrayWhatsApp" onclick="app.checkoutWhatsApp()" data-i18n="traySendWhatsApp">Send Order via WhatsApp</button>
       </div>
     </div>
+    <p class="order-tray__note" data-i18n="trayPaymentNote">Cash on delivery. We confirm the delivery fee on WhatsApp.</p>
   </aside>
 
-
+  <!-- Offline / sync notice -->
+  <p class="sync-notice" id="syncNotice" role="status" hidden></p>
+  <!-- Polite announcements for screen readers -->
+  <div class="sr-only" id="srAnnouncer" aria-live="polite" aria-atomic="true"></div>
 
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer" role="status" aria-live="polite"></div>
@@ -4490,241 +5917,206 @@ html, body {
 
         <div class="footer__col">
           <h4 data-i18n="footerHoursTitle">Baking Hours</h4>
-          <p class="text-small" id="footerHours" style="color:rgba(255,251,247,0.75);margin-bottom:12px;">Mon – Sun: 9:00 AM – 10:00 PM<br/>Fresh bakes ready by 10 AM daily</p>
-          <p class="text-small" style="color:rgba(255,251,247,0.75);"><span data-i18n="footerOrdersInfo">Orders &amp; inquiries:</span> <br/><strong id="footerPhone" style="color:var(--gold-soft);">+964 750 123 4567</strong></p>
+          <p class="text-small footer__muted" id="footerHours">Mon – Sun: 9:00 AM – 10:00 PM<br/>Fresh bakes ready by 10 AM daily</p>
+          <p class="text-small footer__muted" id="footerPhoneRow"><span data-i18n="footerOrdersInfo">Orders &amp; inquiries:</span><br/><a id="footerPhone" class="footer__phone" href="#" dir="ltr"></a></p>
         </div>
       </div>
 
       <div class="footer__bottom">
-        <span>Developed with respect and love by null-tech (&copy; <span id="copyrightYear">2026</span> <strong id="copyrightName">Yummy Sweets</strong>. <span data-i18n="copyrightAllRights">All rights reserved.</span>)</span>
+        <span>&copy; <span id="copyrightYear">2026</span> <strong id="copyrightName">Yummy Sweets</strong>. <span data-i18n="copyrightAllRights">All rights reserved.</span> <span id="watermarkPill" class="footer__credit">Developed with respect and love by null-tech</span></span>
+        <a href="#staff" class="footer__staff-link" onclick="event.preventDefault();app.openStaffLogin();" data-i18n="staffLoginLink">Staff sign-in</a>
         <span data-i18n="footerTagline">Baked fresh daily with wholesome ingredients &amp; pure love.</span>
       </div>
     </div>
   </footer>
 
-  <!-- Login Modal (3 Tabs: Customer / Admin / Developer with ZERO credential hints) -->
-  <div class="modal-overlay" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
-    <div class="modal-window">
+  <!-- Customer sign-in -->
+  <div class="modal-overlay" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authModalTitle" aria-describedby="authModalDesc">
+    <div class="modal-window modal-window--narrow">
       <div class="modal-header">
         <h3 class="modal-title" id="authModalTitle" data-i18n="btnSignIn">Sign In</h3>
-        <button type="button" class="modal-close" onclick="app.closeAuthModal()" aria-label="Close dialog">✕</button>
+        <button type="button" class="modal-close" onclick="app.closeAuthModal()" aria-label="Close dialog" data-i18n-aria="btnClose">✕</button>
       </div>
       <div class="modal-body">
-        <div class="modal-tabs">
-          <button type="button" class="modal-tab-btn is-active" id="tabBtnCustomer" onclick="app.switchAuthTab('customer')" data-i18n="tabCustomer">Customer</button>
-          <button type="button" class="modal-tab-btn" id="tabBtnAdmin" onclick="app.switchAuthTab('admin')" data-i18n="tabAdmin">Admin</button>
-          <button type="button" class="modal-tab-btn" id="tabBtnDev" onclick="app.switchAuthTab('dev')" data-i18n="tabDev">Developer</button>
-        </div>
+        <p class="modal-lead" id="authModalDesc" data-i18n="authCustomerLead">Sign in with Google to keep your order history on every device and to leave reviews.</p>
+        <button type="button" class="btn btn--primary btn--block" onclick="app.handleGoogleLogin('customer')" data-autofocus data-i18n="authGoogleBtn">Continue with Google</button>
+        <p class="auth-message" id="authMessage" role="alert" hidden></p>
+        <p class="modal-footnote" data-i18n="authGuestNote">No account needed to order — just add your name when you send your order.</p>
+      </div>
+    </div>
+  </div>
 
-        <!-- Customer Form -->
-        <form id="customerAuthForm" onsubmit="app.handleCustomerSubmit(event)">
-          <p class="text-small" style="color:var(--muted);margin-bottom:16px;">
-            Sign in with Google or your phone number. Your name will pre-fill your orders.
-          </p>
+  <!-- Staff sign-in (reached from the footer link or #staff) -->
+  <div class="modal-overlay" id="staffAuthModal" role="dialog" aria-modal="true" aria-labelledby="staffAuthTitle" aria-describedby="staffAuthDesc">
+    <div class="modal-window modal-window--narrow">
+      <div class="modal-header">
+        <h3 class="modal-title" id="staffAuthTitle" data-i18n="staffLoginTitle">Staff sign-in</h3>
+        <button type="button" class="modal-close" onclick="app.closeStaffLogin()" aria-label="Close dialog" data-i18n-aria="btnClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-lead" id="staffAuthDesc" data-i18n="staffLoginLead">For the bakery team. Access is granted by the shop owner.</p>
+        <button type="button" class="btn btn--outline btn--block" onclick="app.handleGoogleLogin('staff')" data-i18n="authGoogleBtn">Continue with Google</button>
+        <div class="auth-divider" aria-hidden="true"><span data-i18n="authOr">or</span></div>
+        <form id="staffAuthForm" onsubmit="app.handleStaffSubmit(event)" novalidate>
           <div class="form-group">
-            <label class="form-label" for="custMobile" data-i18n="labelPhone">Mobile Number</label>
-            <input type="tel" id="custMobile" class="form-input" placeholder="+964 750 ..." autocomplete="tel" />
+            <label class="form-label" for="staffEmail" data-i18n="labelEmail">Email</label>
+            <input type="email" id="staffEmail" class="form-input" autocomplete="username" dir="ltr" required />
           </div>
           <div class="form-group">
-            <label class="form-label" for="custName" data-i18n="labelDisplayName">Your Name / Display Name</label>
-            <input type="text" id="custName" class="form-input" placeholder="e.g. Sara" autocomplete="name" />
-          </div>
-          <button type="button" class="btn btn--outline" style="width:100%;margin-top:8px;" onclick="app.handleGoogleLogin('customer')">Sign in with Google</button>
-          <div style="text-align:center;margin:12px 0;color:var(--muted);font-size:0.9rem;">- or -</div>
-          <button type="submit" class="btn btn--primary" style="width:100%;">Continue with Phone</button>
-        </form>
-
-        <!-- Staff / Operator Login Form (Shared by Admin and Developer tabs, ZERO credential hints) -->
-        <form id="staffAuthForm" style="display:none;" onsubmit="app.handleStaffSubmit(event)">
-          <p class="text-small" id="staffFormDesc" style="color:var(--muted);margin-bottom:16px;" data-i18n="staffFormDesc">
-            Please enter your management credentials or login with Google to access the bakery control panel.
-          </p>
-          <div class="form-group" id="staffUsernameGroup">
-            <label class="form-label" for="staffUsername" data-i18n="labelUsername">Username or Email</label>
-            <input type="text" id="staffUsername" class="form-input" placeholder="Username or email" autocomplete="username" />
-          </div>
-          <div class="form-group" id="staffPasswordGroup">
             <label class="form-label" for="staffPassword" data-i18n="labelPassword">Password</label>
-            <input type="password" id="staffPassword" class="form-input" placeholder="••••••••" autocomplete="current-password" />
+            <input type="password" id="staffPassword" class="form-input" autocomplete="current-password" required />
           </div>
-          <button type="button" class="btn btn--outline" style="width:100%;margin-top:8px;" onclick="app.handleGoogleLogin('staff')">Login with Google</button>
-          <div style="text-align:center;margin:12px 0;color:var(--muted);font-size:0.9rem;">- or -</div>
-          <button type="submit" class="btn btn--primary" style="width:100%;" id="btnStaffLogin">Login</button>
+          <p class="auth-message" id="staffAuthMessage" role="alert" hidden></p>
+          <button type="submit" class="btn btn--primary btn--block" id="btnStaffLogin" data-i18n="btnStaffLogin">Sign in</button>
         </form>
       </div>
     </div>
   </div>
 
-  <!-- Customer Order History Modal (Section 7.7) -->
-  <div class="modal-overlay" id="historyModal" role="dialog" aria-modal="true" aria-labelledby="historyModalTitle">
+  <!-- Order history -->
+  <div class="modal-overlay" id="historyModal" role="dialog" aria-modal="true" aria-labelledby="historyModalTitle" aria-describedby="historyModalSubtitle">
     <div class="modal-window history-modal-window">
       <div class="modal-header">
         <div class="history-modal-header-content">
           <h3 class="modal-title" id="historyModalTitle" data-i18n="myOrdersTitle">My Orders</h3>
-          <p class="history-modal-subtitle" id="historyModalSubtitle" data-i18n="historyZero">You've placed 0 orders.</p>
+          <p class="history-modal-subtitle" id="historyModalSubtitle"></p>
         </div>
-        <button type="button" class="modal-close" onclick="app.closeHistoryModal()" aria-label="Close dialog">✕</button>
+        <button type="button" class="modal-close" onclick="app.closeHistoryModal()" aria-label="Close dialog" data-i18n-aria="btnClose">✕</button>
       </div>
       <div class="modal-body history-modal-body" id="historyModalBody">
-        <!-- Rendered dynamically by app.renderCustomerHistory() -->
+        <p class="history-scope" id="historyScopeNote"></p>
+        <div class="history-stats" id="historyCustomerStats" hidden></div>
+        <div class="history-list" id="historyOrdersList"></div>
       </div>
     </div>
   </div>
 
-  <!-- Control Panel CMS Modal -->
+  <!-- Control Panel -->
   <div class="modal-overlay" id="panelModal" role="dialog" aria-modal="true" aria-labelledby="panelModalTitle">
     <div class="modal-window modal-window--large">
       <div class="modal-header">
-        <div style="display:flex;align-items:center;gap:12px;">
+        <div class="panel-header-title">
           <h3 class="modal-title" id="panelModalTitle" data-i18n="panelTitle">Bakery Control Panel</h3>
-          <span class="badge badge--admin" id="panelUserBadge">ADMIN</span>
+          <span class="badge badge--admin" id="panelUserBadge"></span>
+          <span class="panel-save-status" id="panelSaveStatus" role="status" aria-live="polite"></span>
         </div>
-        <button type="button" class="modal-close" onclick="app.closePanelModal()" aria-label="Close control panel">✕</button>
+        <button type="button" class="modal-close" onclick="app.closePanelModal()" aria-label="Close control panel" data-i18n-aria="btnClosePanel">✕</button>
       </div>
-      <!-- Modal Scoped Toast Container (Top-right of modal) -->
       <div class="modal-toast-container" id="modalToastContainer" role="status" aria-live="polite"></div>
       <div class="panel-layout">
-        <!-- Sidebar Navigation -->
-        <aside class="panel-sidebar" id="panelSidebar" role="navigation" aria-label="Control Panel Modules">
-          <!-- Populated dynamically based on user role -->
-        </aside>
-
-        <!-- Panel Content Work Area -->
-        <div class="panel-content" id="panelContent" role="region" aria-live="polite">
-          <!-- Populated by app.renderPanelTab() -->
-        </div>
+        <div class="panel-sidebar" id="panelSidebar"></div>
+        <div class="panel-content" id="panelContent"></div>
       </div>
     </div>
   </div>
 
-
-  <!-- Custom Confirm Modal -->
-  <div class="modal-overlay" id="submitReviewModal" role="dialog" aria-modal="true" style="z-index:9999;">
-    <div class="modal-window" style="max-width: 400px;">
+  <!-- Leave a review (moderated) -->
+  <div class="modal-overlay" id="submitReviewModal" role="dialog" aria-modal="true" aria-labelledby="reviewModalTitle" aria-describedby="reviewModalDesc">
+    <div class="modal-window modal-window--narrow">
       <div class="modal-header">
-        <h3 class="modal-title" data-i18n="leaveReviewTitle">Leave a Review</h3>
+        <h3 class="modal-title" id="reviewModalTitle" data-i18n="leaveReviewTitle">Leave a Review</h3>
+        <button type="button" class="modal-close" onclick="app.closeSubmitReviewModal()" aria-label="Close dialog" data-i18n-aria="btnClose">✕</button>
       </div>
       <div class="modal-body">
-        <p style="color:var(--muted); font-size:0.9rem; margin-bottom:16px;" data-i18n="leaveReviewDesc">We'd love to hear about your experience!</p>
-        <form onsubmit="app.submitCustomerReview(event)">
+        <p class="modal-lead" id="reviewModalDesc" data-i18n="leaveReviewDescModerated">Tell us about your cake. Reviews appear after the bakery approves them.</p>
+        <div id="reviewSignInGate" hidden>
+          <p data-i18n="reviewSignInNeeded">Please sign in with Google so we can make sure reviews come from real customers.</p>
+          <button type="button" class="btn btn--primary btn--block" onclick="app.signInForReview()" data-i18n="authGoogleBtn">Continue with Google</button>
+        </div>
+        <form id="reviewSubmitForm" onsubmit="app.submitCustomerReview(event)" hidden>
           <div class="form-group">
-            <label class="form-label" data-i18n="reviewFormName">Your Name</label>
-            <input type="text" id="custReviewName" class="form-input" required />
+            <label class="form-label" for="custReviewName" data-i18n="reviewFormName">Your Name</label>
+            <input type="text" id="custReviewName" class="form-input" maxlength="60" autocomplete="name" required />
           </div>
+          <fieldset class="form-group rating-field">
+            <legend class="form-label" data-i18n="reviewRatingLabel">Your rating</legend>
+            <div class="rating-options">
+              <label><input type="radio" name="reviewRating" value="5" checked /> <span aria-hidden="true">★★★★★</span><span class="sr-only">5</span></label>
+              <label><input type="radio" name="reviewRating" value="4" /> <span aria-hidden="true">★★★★</span><span class="sr-only">4</span></label>
+              <label><input type="radio" name="reviewRating" value="3" /> <span aria-hidden="true">★★★</span><span class="sr-only">3</span></label>
+              <label><input type="radio" name="reviewRating" value="2" /> <span aria-hidden="true">★★</span><span class="sr-only">2</span></label>
+              <label><input type="radio" name="reviewRating" value="1" /> <span aria-hidden="true">★</span><span class="sr-only">1</span></label>
+            </div>
+          </fieldset>
           <div class="form-group">
-            <label class="form-label" data-i18n="reviewFormQuote">Your Review</label>
-            <textarea id="custReviewQuote" class="form-input" rows="4" style="resize:vertical;" required></textarea>
+            <label class="form-label" for="custReviewQuote" data-i18n="reviewFormQuote">Your Review</label>
+            <textarea id="custReviewQuote" class="form-textarea" rows="4" maxlength="1000" required></textarea>
           </div>
-          <div style="display:flex; gap:8px; margin-top:20px; justify-content:flex-end;">
+          <p class="auth-message" id="reviewMessage" role="alert" hidden></p>
+          <div class="modal-actions">
             <button type="button" class="btn btn--ghost" onclick="app.closeSubmitReviewModal()" data-i18n="btnCancel">Cancel</button>
-            <button type="submit" class="btn btn--primary" data-i18n="btnSubmit">Submit</button>
+            <button type="submit" class="btn btn--primary" id="btnSubmitReview" data-i18n="btnSendReview">Send review</button>
           </div>
         </form>
       </div>
     </div>
   </div>
 
-  <div class="modal-overlay" id="customConfirmModal" role="dialog" aria-modal="true" style="z-index:9999;">
-    <div class="modal-window" style="max-width: 400px;">
+  <!-- Confirmation dialog -->
+  <div class="modal-overlay" id="customConfirmModal" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
+    <div class="modal-window modal-window--narrow">
       <div class="modal-header">
         <h3 class="modal-title" id="confirmTitle">Confirm</h3>
       </div>
       <div class="modal-body">
-        <p id="confirmMessage" style="margin-bottom: 24px; color: var(--ink);"></p>
-        <div style="display: flex; justify-content: flex-end; gap: 12px;">
-          <button type="button" class="btn btn--ghost" id="confirmCancelBtn">Cancel</button>
+        <p id="confirmMessage" class="modal-lead"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn--ghost" id="confirmCancelBtn" data-autofocus>Cancel</button>
           <button type="button" class="btn btn--primary" id="confirmOkBtn">OK</button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Custom Prompt Modal (Add Staff) -->
-  <div class="modal-overlay" id="customPromptModal" role="dialog" aria-modal="true" style="z-index:9999;">
-    <div class="modal-window" style="max-width: 400px;">
+  <!-- Staff directory entry -->
+  <div class="modal-overlay" id="customPromptModal" role="dialog" aria-modal="true" aria-labelledby="promptTitle">
+    <div class="modal-window modal-window--narrow">
       <div class="modal-header">
-        <h3 class="modal-title" id="promptTitle">Add Staff Account</h3>
-        <button type="button" class="modal-close" onclick="document.getElementById('customPromptModal').classList.remove('is-open')">✕</button>
+        <h3 class="modal-title" id="promptTitle" data-i18n="staffEntryTitle">Staff member</h3>
+        <button type="button" class="modal-close" onclick="app.closeDialog('customPromptModal')" aria-label="Close dialog" data-i18n-aria="btnClose">✕</button>
       </div>
       <div class="modal-body">
-        <form id="addStaffForm" onsubmit="app.submitAddStaff(event)">
+        <p class="modal-lead" data-i18n="staffEntryLead">The person signs in with their own Google or email account. Copy their User UID from Firebase Authentication.</p>
+        <form id="addStaffForm" onsubmit="app.submitAddStaff(event)" novalidate>
           <div class="form-group">
-            <label class="form-label" for="promptUsername">Username</label>
-            <input type="text" id="promptUsername" class="form-input" required />
+            <label class="form-label" for="promptUid" data-i18n="staffUidLabel">User UID</label>
+            <input type="text" id="promptUid" class="form-input" dir="ltr" autocomplete="off" required />
           </div>
           <div class="form-group">
-            <label class="form-label" for="promptPassword">Password (min 4 chars)</label>
-            <input type="password" id="promptPassword" class="form-input" required minlength="4" />
+            <label class="form-label" for="promptEmail" data-i18n="labelEmail">Email</label>
+            <input type="email" id="promptEmail" class="form-input" dir="ltr" required />
           </div>
           <div class="form-group">
-            <label class="form-label" for="promptName">Display Name</label>
-            <input type="text" id="promptName" class="form-input" required />
+            <label class="form-label" for="promptName" data-i18n="usersColName">Name</label>
+            <input type="text" id="promptName" class="form-input" maxlength="80" />
           </div>
           <div class="form-group">
-            <label class="form-label" for="promptRole">Role</label>
-            <select id="promptRole" class="form-select" onchange="document.getElementById('permissionsGroup').style.display = (this.value === 'staff' ? 'block' : 'none');">
-              <option value="staff">Staff</option>
+            <label class="form-label" for="promptRole" data-i18n="usersColRole">Role</label>
+            <select id="promptRole" class="form-select">
+              <option value="staff" data-i18n="role_staff">Staff</option>
+              <option value="admin" data-i18n="role_admin">Admin</option>
             </select>
-            <small style="color:var(--muted); font-size:0.75rem; display:block; margin-top:4px;">Only staff accounts can be created. Admins cannot create other admins.</small>
           </div>
-          <div class="form-group" id="permissionsGroup" style="display:block;">
-            <label class="form-label">Permissions (Staff only)</label>
-            <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
-              <label><input type="checkbox" name="staffPerms" value="products" checked> Products</label>
-              <label><input type="checkbox" name="staffPerms" value="customers" checked> Customers</label>
-              <label><input type="checkbox" name="staffPerms" value="economy"> Economy (Orders)</label>
-              <label><input type="checkbox" name="staffPerms" value="brand"> Brand & Logo</label>
-              <label><input type="checkbox" name="staffPerms" value="theme"> Theme</label>
-              <label><input type="checkbox" name="staffPerms" value="fonts"> Fonts</label>
-              <label><input type="checkbox" name="staffPerms" value="about"> About Us</label>
-              <label><input type="checkbox" name="staffPerms" value="contact"> Contact</label>
-              <label><input type="checkbox" name="staffPerms" value="socials"> Social Media</label>
+          <fieldset class="form-group" id="permissionsGroup">
+            <legend class="form-label" data-i18n="staffPermsLegend">Sections staff can edit</legend>
+            <div class="perm-grid">
+              <label><input type="checkbox" name="staffPerms" value="products"> <span data-i18n="perm_products">Products</span></label>
+              <label><input type="checkbox" name="staffPerms" value="customers"> <span data-i18n="perm_customers">Customers</span></label>
+              <label><input type="checkbox" name="staffPerms" value="economy"> <span data-i18n="perm_economy">Economy (Orders)</span></label>
+              <label><input type="checkbox" name="staffPerms" value="reviews"> <span data-i18n="perm_reviews">Reviews</span></label>
+              <label><input type="checkbox" name="staffPerms" value="brand"> <span data-i18n="perm_brand">Brand & Logo</span></label>
+              <label><input type="checkbox" name="staffPerms" value="theme"> <span data-i18n="perm_theme">Theme</span></label>
+              <label><input type="checkbox" name="staffPerms" value="fonts"> <span data-i18n="perm_fonts">Fonts</span></label>
+              <label><input type="checkbox" name="staffPerms" value="about"> <span data-i18n="perm_about">About Us</span></label>
+              <label><input type="checkbox" name="staffPerms" value="faq"> <span data-i18n="perm_faq">FAQ</span></label>
+              <label><input type="checkbox" name="staffPerms" value="contact"> <span data-i18n="perm_contact">Contact</span></label>
+              <label><input type="checkbox" name="staffPerms" value="socials"> <span data-i18n="perm_socials">Social Media</span></label>
             </div>
-          </div>
-          <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px;">
-            <button type="button" class="btn btn--ghost" onclick="document.getElementById('customPromptModal').classList.remove('is-open')">Cancel</button>
-            <button type="submit" class="btn btn--primary">Add Staff</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <!-- Edit User Modal (Users tab) -->
-  <div class="modal-overlay" id="editUserModal" role="dialog" aria-modal="true" aria-labelledby="editUserTitle">
-    <div class="modal-window" style="max-width: 420px;">
-      <div class="modal-header">
-        <h3 class="modal-title" id="editUserTitle">Edit User</h3>
-        <button type="button" class="modal-close" onclick="document.getElementById('editUserModal').classList.remove('is-open')">✕</button>
-      </div>
-      <div class="modal-body">
-        <form id="editUserForm" onsubmit="app.submitEditUser(event)">
-          <input type="hidden" id="editUserId" />
-          <div class="form-group">
-            <label class="form-label" for="editUserName">Display Name</label>
-            <input type="text" id="editUserName" class="form-input" required />
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="editUserLogin">Username / Phone</label>
-            <input type="text" id="editUserLogin" class="form-input" dir="ltr" required />
-          </div>
-          <div class="form-group" id="editUserPermsGroup">
-            <label class="form-label">Permissions</label>
-            <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
-              <label><input type="checkbox" name="editUserPerms" value="products"> Products</label>
-              <label><input type="checkbox" name="editUserPerms" value="customers"> Customers</label>
-              <label><input type="checkbox" name="editUserPerms" value="economy"> Economy (Orders)</label>
-              <label><input type="checkbox" name="editUserPerms" value="brand"> Brand & Logo</label>
-              <label><input type="checkbox" name="editUserPerms" value="theme"> Theme</label>
-              <label><input type="checkbox" name="editUserPerms" value="fonts"> Fonts</label>
-              <label><input type="checkbox" name="editUserPerms" value="about"> About Us</label>
-              <label><input type="checkbox" name="editUserPerms" value="contact"> Contact</label>
-              <label><input type="checkbox" name="editUserPerms" value="socials"> Social Media</label>
-            </div>
-          </div>
-          <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px;">
-            <button type="button" class="btn btn--ghost" onclick="document.getElementById('editUserModal').classList.remove('is-open')">Cancel</button>
-            <button type="submit" class="btn btn--primary">Save Changes</button>
+          </fieldset>
+          <p class="auth-message" id="staffFormMessage" role="alert" hidden></p>
+          <div class="modal-actions">
+            <button type="button" class="btn btn--ghost" onclick="app.closeDialog('customPromptModal')" data-i18n="btnCancel">Cancel</button>
+            <button type="submit" class="btn btn--primary" data-i18n="btnSave">Save</button>
           </div>
         </form>
       </div>

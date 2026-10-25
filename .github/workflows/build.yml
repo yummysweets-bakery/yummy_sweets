@@ -6,17 +6,55 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Use Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: 20.x
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
 
-    - name: Build index.html
-      run: node builder/assemble.js
+      - name: Use Java (Firebase emulators)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (syntax + source secret scan)
+        run: npm run lint
+
+      - name: Build (includes output secret scan)
+        run: npm run build
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Firestore rules tests (emulator, demo project)
+        run: npm run test:rules
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Storefront end-to-end tests
+        run: npm run test:e2e
+
+      - name: Emulator end-to-end tests (auth, orders, moderation)
+        run: npm run test:e2e:emulator
+
+      - name: Upload test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/
+          retention-days: 7

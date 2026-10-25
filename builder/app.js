@@ -1,67 +1,57 @@
 
 /**
- * Yummy Sweets — Bilingual Artisanal Boutique Bakery Web Application (v2)
- * Single-file Vanilla ES6+ Engine
+ * Yummy Sweets — Bilingual Artisanal Boutique Bakery Web Application (v3)
+ * Vanilla ES modules. Pure logic lives in builder/lib/ and is unit tested (tests/unit).
+ * Public reads: builder/lib/publicdata.js (Firestore Lite). Signed-in reads/writes: builder/lib/datastore.js
+ * (full SDK, loaded on demand). Identity: builder/lib/session.js.
  */
 
-import { initializeApp } from "firebase/app";
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut as firebaseSignOut, signInWithEmailAndPassword } from "firebase/auth";
-import { getFirestore, doc, getDoc, setDoc, deleteDoc, getDocFromServer, collection, getDocs, onSnapshot, query, where, writeBatch } from "firebase/firestore";
-import firebaseConfig from "./firebase-applet-config.json";
+import { buildStructuredData } from './builder/lib/seo.js';
+import { firebaseReady } from './builder/lib/firebase.js';
+import { fetchPublicConfig, fetchProducts, fetchApprovedReviews } from './builder/lib/publicdata.js';
+import { describeDataError } from './builder/lib/errors.js';
 
-let db, auth;
-const OperationType = { CREATE: 'create', UPDATE: 'update', DELETE: 'delete', LIST: 'list', GET: 'get', WRITE: 'write' };
-
-function handleFirestoreError(error, operationType, path) {
-  const errInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth?.currentUser?.uid,
-      email: auth?.currentUser?.email,
-      emailVerified: auth?.currentUser?.emailVerified,
-      isAnonymous: auth?.currentUser?.isAnonymous
-    },
-    operationType,
-    path
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+// Full Firestore SDK (realtime + writes), loaded only for signed-in users and staff.
+let store = null;
+let storePromise = null;
+function loadStore() {
+  if (!storePromise) storePromise = import('./builder/lib/datastore.js').then(m => (store = m));
+  return storePromise;
 }
-
-try {
-  const firebaseApp = initializeApp(firebaseConfig);
-  db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
-  auth = getAuth(firebaseApp);
-  
-  // Test connection asynchronously
-  (async () => {
-    try {
-      await getDocFromServer(doc(db, 'test', 'connection'));
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('the client is offline')) {
-        console.error("Please check your Firebase configuration.");
-      }
-    }
-  })();
-} catch (e) {
-  console.error("Firebase init failed", e);
-}
+import {
+  watchSession, signInWithGoogle, signInWithEmail, signOutUser, refreshClaims,
+  isPrivileged, canAccessTab, describeAuthError, STAFF_PERMS,
+} from './builder/lib/session.js';
+import { escapeHTML, jsArg, sanitizeInlineHTML, stripTags, safeUrl, escapeMultiline } from './builder/lib/escape.js';
+import { DEFAULT_ECONOMY as BASE_ECONOMY, computeBreakdown, formatMoney, checkPromo, hasSecondaryCurrency } from './builder/lib/pricing.js';
+import { normalizeKurdish, searchTokens, matchesSearch, highlightMatches } from './builder/lib/search.js';
+import { parseMenuHash, buildMenuHash, inPriceRange } from './builder/lib/urlstate.js';
+import { loadCart, saveCart, sanitizeCart, addItem, changeQty, removeItem, priceLines, cartSubtotal, cartCount } from './builder/lib/cart.js';
+import { earliestFulfillment, toLocalInputValue, validateFulfillment, formatFulfillment, leadHours } from './builder/lib/dates.js';
+import { normalizeWhatsAppNumber, buildWhatsAppUrl, buildOrderMessage } from './builder/lib/whatsapp.js';
+import { buildOrderRecord, validateOrderRecord } from './builder/lib/orders.js';
+import { textOn } from './builder/lib/color.js';
+import { ensureFonts } from './builder/lib/fonts.js';
+import { srcsetFor } from './builder/lib/images.js';
 
 // Top-of-script default constants
-const WHATSAPP_NUMBER = '15551234567';
 const SHOP_NAME       = 'Yummy Sweets';
 const IQD_RATE        = 1310;
 
-// LocalStorage Namespaced & Versioned Keys
+// localStorage keys. Only public data, per-viewer preferences, the cart and this
+// device's own order history are cached — never sessions, roles or other people's data.
 const KEYS = {
   CONFIG: 'sc_config_v2',
-  USERS: 'sc_users_v2',
-  SESSION: 'sc_session_v2',
   PRODUCTS: 'sc_products_v2',
   PREF: 'sc_pref_v2',
-  ORDERS: 'sc_orders_v2',
-  CUSTOMER_NOTES: 'sc_customer_notes_v2'
+  MY_ORDERS: 'ys_my_orders_v1',
+  GUEST: 'ys_guest_v1',
+  PRODUCTS_REMOTE: 'ys_products_remote_v1'
 };
+
+// Keys written by earlier versions. Some held plaintext staff passwords, forgeable
+// sessions or staff copies of every customer's data, so they are deleted on startup.
+const LEGACY_KEYS = ['sc_users_v2', 'sc_session_v2', 'yummy_session', 'yummy_users', 'sc_orders_v2', 'sc_customer_notes_v2'];
 
 // Arabic & Kurdish Font Options
 const FONT_OPTIONS = [
@@ -89,28 +79,7 @@ const FONT_OPTIONS_EN = [
 ];
 
 // Economy Configuration Defaults
-const DEFAULT_ECONOMY = {
-  primaryCurrency: 'USD',
-  secondaryCurrency: 'IQD',
-  showSecondary: true,
-  currencySymbol: 'د.ع',
-  exchangeRate: 1310,
-  roundingRule: 250,
-  autoRefreshRate: false,
-  deliveryFee: 8,
-  freeDeliveryOver: 60,
-  minimumOrder: 0,
-  pickupOnly: false,
-  taxEnabled: false,
-  taxRate: 0,
-  taxLabel: 'VAT',
-  taxIncluded: true,
-  promoCode: '',
-  promoType: 'percent',
-  promoValue: 0,
-  promoExpiry: '',
-  lastUpdatedRate: null
-};
+const DEFAULT_ECONOMY = { ...BASE_ECONOMY };
 
 const THEMES = {
   berry: {
@@ -187,8 +156,8 @@ const DEFAULT_CONFIG = {
   logoUrl: '',
   logoImageUrl: '',
   announcement: {
-    en: 'Pre-order for weekend celebrations! <strong>Free local delivery</strong> on orders over $50.',
-    ku: 'پێشوەختە داوا بکە بۆ ئاهەنگەکانی کۆتایی هەفتە! <strong>گەیاندنی خۆڕایی</strong> بۆ داواکاری سەروو $50.'
+    en: 'Pre-order for weekend celebrations! <strong>Free local delivery</strong> on orders over {freeDelivery}.',
+    ku: 'پێشوەختە داوا بکە بۆ ئاهەنگەکانی کۆتایی هەفتە! <strong>گەیاندنی خۆڕایی</strong> بۆ داواکاری سەروو {freeDelivery}.'
   },
   aboutUs: {
     en: 'Yummy Sweets began as a dream in our home kitchen: to restore pure artisan craftsmanship to celebration cakes. We believe true indulgence comes from authentic, unadulterated ingredients. Every sponge is whipped by hand, every fruit compote simmered from scratch, and every ganache blended from fine single-origin cocoa.',
@@ -205,8 +174,9 @@ const DEFAULT_CONFIG = {
     { q: { en: 'Do you offer gluten-free or eggless options?', ku: 'ئایا کێکی بێ هێلکە یان بێ گلوتینتان هەیە؟' }, a: { en: 'Yes! We offer specialized eggless chocolate fudge cakes and almond-flour gluten-friendly tarts upon request. Please specify in your notes.', ku: 'بەڵێ! کێکی شوکۆڵاتەی تایبەت بەبێ هێلکە و تارتی ئاردی بادەم بۆ کەسانی هەستیار ئامادە دەکرێت بە داواکاری پێشوەختە.' } }
   ],
   contact: {
-    whatsapp: '15551234567',
-    phone: '+964 750 123 4567',
+    // Set the real numbers in Control Panel → Contact. Checkout refuses to use an empty or placeholder number.
+    whatsapp: '',
+    phone: '',
     email: 'hello@yummysweets.com',
     address: {
       en: 'Dream City Avenue, Near English Village, Erbil, Kurdistan',
@@ -272,7 +242,7 @@ function processImageFile(file) {
 
           let dataUrl = '';
           try {
-            dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            dataUrl = canvas.toDataURL('image/jpeg', 0.8);
           } catch {
             dataUrl = canvas.toDataURL('image/png');
           }
@@ -281,8 +251,9 @@ function processImageFile(file) {
           const payloadLength = dataUrl.length - (dataUrl.indexOf(',') + 1);
           let approxBytes = Math.round(payloadLength * 0.75);
 
-          // If output exceeds 500 KB, re-export at quality 0.65
-          if (approxBytes > 500 * 1024) {
+          // Product photos are stored in Firestore and downloaded by every visitor:
+          // aim for ~250 KB, and never exceed what firestore.rules accepts (~650 KB).
+          if (approxBytes > 250 * 1024) {
             try {
               const lowerDataUrl = canvas.toDataURL('image/jpeg', 0.65);
               const lowerPayload = lowerDataUrl.length - (lowerDataUrl.indexOf(',') + 1);
@@ -295,7 +266,7 @@ function processImageFile(file) {
           }
 
           // If output still exceeds 800 KB, reject
-          if (approxBytes > 800 * 1024) {
+          if (approxBytes > 640 * 1024) {
             return reject(new Error('OUTPUT_TOO_LARGE'));
           }
 
@@ -424,13 +395,6 @@ function processLogoFile(file) {
     reader.readAsDataURL(file);
   });
 }
-
-// Seed Users (Admin & Dev credentials live solely in code and are never revealed in DOM)
-const DEFAULT_USERS = [
-  { id: 'u_dev', username: 'dev', password: 'dev123', name: 'Technical Operator', role: 'dev' },
-  { id: 'u_admin', username: 'admin', password: 'admin123', name: 'Head Baker Admin', role: 'admin' },
-  { id: 'dmfw78AEPYW1htK7rgqptaFRqs03', username: 'yumy.swets', email: 'yumy.swets@gmail.com', password: 'YummyAdmin2026!', name: 'Yummy Sweets Admin', role: 'admin' }
-];
 
 // Seed 14 Fully Bilingual Products with Real Bakery Photography
 const DEFAULT_PRODUCTS = [
@@ -599,7 +563,7 @@ const TRANSLATIONS = {
     economyTitle: "Pricing & Economy",
     economyDesc: "Manage currency conversion, delivery fees, and minimum order rules.",
     shopTagline: 'Artisanal Boutique Bakery',
-    announcementText: 'Pre-order for weekend celebrations! <strong>Free local delivery</strong> on orders over $50.',
+    announcementText: 'Pre-order for weekend celebrations! <strong>Free local delivery</strong> on orders over {freeDelivery}.',
     navMenu: 'Menu',
     navHowItWorks: 'How It Works',
     navOurStory: 'Our Story',
@@ -850,6 +814,10 @@ fontPreview: 'Preview',
     economyPreviewSample: 'Sample order: $50 subtotal',
     trayDetails: 'Details ▾',
     trayDetailsClose: 'Close ▴',
+    trayDateLabel: 'Delivery or pickup date and time *',
+    trayPaymentNote: 'Cash on delivery. We confirm the delivery fee on WhatsApp.',
+    inOrderCount: '{n} in your order',
+    skipToMenu: 'Skip to the menu',
     trayApplyPromo: 'Apply',
     trayRemovePromo: 'Remove',
     trayPromoPlaceholder: 'Promo code',
@@ -951,7 +919,158 @@ fontPreview: 'Preview',
     themePresetSage:'Sage',
     themePresetRose:'Rose',
     themePresetMidnight:'Midnight',
-    themeAutoDark:'Enable auto-dark mode (system)'
+    themeAutoDark:'Enable auto-dark mode (system)',
+    // Added in v3: accounts, checkout, moderation and save states
+    btnClose: 'Close',
+    btnConfirm: 'Confirm',
+    confirmTitle: 'Are you sure?',
+    errFillFields: 'Please fill in the required fields.',
+    errInvalidUrl: 'Use a full web address that starts with https://',
+    errInvalidWhatsApp: 'Enter the WhatsApp number in international format, for example 9647501234567.',
+    loginSuccess: 'You are signed in.',
+    sessionExpired: 'Your staff sign-in has expired. Please sign in again.',
+    staffAccessGranted: 'Signed in. Opening the control panel.',
+    staffNoAccess: 'This account doesn\'t have staff access. Ask the shop owner to add you.',
+    syncOffline: 'You\'re offline. Showing the menu saved on this device.',
+    saveNeedsSignIn: 'Sign in with a staff account to save changes.',
+    saveOffline: 'Not saved: you\'re offline. Your changes are still in the form — try again when you\'re connected.',
+    saveDenied: 'Not saved: your account isn\'t allowed to change this section.',
+    saveInvalid: 'Not saved: some values are not valid. Check the form and try again.',
+    saveFailed: 'Not saved: something went wrong. Your changes are still in the form — try again.',
+    statusSaving: 'Saving…',
+    statusSaved: 'All changes saved',
+    statusFailed: 'Last change not saved',
+    menuNoProducts: 'The menu is being updated. Please check back soon.',
+    cartEach: '{price} each',
+    cartQtyLabel: 'Quantity of {name}',
+    cartDecrease: 'One fewer {name}',
+    cartIncrease: 'One more {name}',
+    cartRemove: 'Remove {name}',
+    cartItemRemoved: '{name} removed from your order.',
+    cartClearTitle: 'Clear your order?',
+    cartClearConfirm: 'This removes every item from your order tray.',
+    trayItemsLabel: '{n} items',
+    pickupOnlyLabel: 'Pickup from our kitchen',
+    trayDateHint: 'We need at least {hours} hours. Earliest: {date}.',
+    checkoutNeedName: 'Add your name so the bakery knows who the order is for.',
+    checkoutNeedDate: 'Choose a delivery or pickup date and time.',
+    checkoutBadDate: 'That date isn\'t valid. Choose it again from the calendar.',
+    checkoutDateTooSoon: 'We need at least {hours} hours to bake your order. The earliest time is {date}.',
+    checkoutDateTooFar: 'Please choose a date within the next 12 months.',
+    checkoutNoWhatsApp: 'WhatsApp ordering isn\'t set up yet. Please contact the bakery directly.',
+    checkoutOpened: 'WhatsApp opened. Complete sending your order in WhatsApp.',
+    checkoutBlocked: 'WhatsApp didn\'t open automatically. Use the link below to send your order.',
+    checkoutAgainTitle: 'Send this order again?',
+    checkoutAgainConfirm: 'You already opened WhatsApp with this exact order. Open it again?',
+    checkoutAgainOk: 'Open WhatsApp again',
+    checkoutAddressLabel: 'Delivery address',
+    orderSavedToHistory: 'Order saved to your order history.',
+    orderHistorySaveFailed: 'Your order message is ready in WhatsApp, but it couldn\'t be saved to your online order history.',
+    trayClearedAfterSend: 'Order tray cleared.',
+    myOrdersBtn: 'My orders',
+    myOrdersHideDetails: 'Hide details',
+    historyScopeAccount: 'Orders linked to your account, plus any sent from this device.',
+    historyScopeDevice: 'Orders sent from this device. Sign in to keep your history across devices.',
+    historyRequestedFor: 'Requested for',
+    orderStatusSent: 'Sent on WhatsApp',
+    orderStatusConfirmed: 'Confirmed',
+    orderStatusCompleted: 'Completed',
+    customerFallbackName: 'Customer',
+    contactNotSet: 'Contact details coming soon.',
+    customersScopeHint: 'Shows customers with an account and the latest 200 orders.',
+    darkModeOn: 'Dark mode on',
+    darkModeOff: 'Light mode on',
+    reviewVerifiedRole: 'Customer',
+    reviewStarsLabel: 'Rated {n} out of 5',
+    reviewsEmpty: 'No reviews yet. Be the first to share yours.',
+    reviewPending: 'Thank you! Your review will appear once the bakery has approved it.',
+    reviewDenied: 'Your review could not be sent. Please sign in again and retry.',
+    reviewFailed: 'Your review could not be sent. Please try again.',
+    reviewsPendingTitle: 'Waiting for approval',
+    reviewsPendingEmpty: 'No reviews are waiting.',
+    reviewsDecidedTitle: 'Recently moderated',
+    reviewApprove: 'Approve',
+    reviewReject: 'Reject',
+    reviewUnpublish: 'Unpublish',
+    reviewApproved: 'Review published.',
+    reviewRejected: 'Review hidden.',
+    reviewDeleteConfirm: 'Delete this review permanently?',
+    reviewsCuratedTitle: 'Featured reviews',
+    reviewsCuratedHint: 'Reviews you add here appear on the storefront as written.',
+    reviewsResetBtn: 'Restore defaults',
+    reviewsResetTitle: 'Restore the default reviews?',
+    reviewsResetConfirm: 'This replaces your featured reviews with the original three.',
+    reviewsAddBtn: 'Add review',
+    tabBrand: 'Brand & Logo',
+    tabAbout: 'About Us',
+    tabFaq: 'FAQ',
+    tabReviews: 'Reviews',
+    tabContact: 'Contact',
+    tabSocials: 'Social Media',
+    tabProducts: 'Products',
+    tabUsers: 'Staff',
+    tabData: 'Data',
+    usersClaimsHint: 'Staff access is granted by the shop owner with a one-time command. Add or change people here, then run:',
+    staffUidInvalid: 'Paste the person\'s User UID from Firebase Authentication.',
+    staffSavedHint: 'Saved. Run the staff command so the change takes effect, then ask them to sign in again.',
+    staffRemovedHint: 'Removed from the list. Run the staff command to revoke their access.',
+    prodDeleteTitle: 'Delete this product?',
+    prodNewDraft: 'New product created. Fill it in and press Save to publish it.',
+    prodPhotoRemovedPending: 'Photo removed. Press Save to apply.',
+    prodPriceInvalid: 'Enter a price between 0 and 100,000.',
+    importTitle: 'Import this backup?',
+    importConfirm: 'This replaces the live shop settings and updates every product in the backup.',
+    importBtn: 'Import backup',
+    resetDeviceTitle: 'Reset this device',
+    resetDeviceBtn: 'Clear data on this device',
+    resetDeviceHint: 'Clears the menu, settings and order history cached in this browser. The live shop isn\'t changed.',
+    resetDeviceConfirm: 'Clear everything cached in this browser? The live shop isn\'t changed.',
+    resetDeviceDone: 'This device was reset. Live shop data is loading again.',
+    leadTimeLabel: 'Preparation time (hours)',
+    leadTimeHint: 'Customers cannot pick a delivery time sooner than this.',
+    authErr_popupClosed: 'Sign-in was cancelled.',
+    authErr_popupBlocked: 'Your browser blocked the sign-in window. Allow pop-ups and try again.',
+    authErr_badCredentials: 'That email and password don\'t match.',
+    authErr_badEmail: 'That email address doesn\'t look right.',
+    authErr_tooMany: 'Too many attempts. Wait a few minutes and try again.',
+    authErr_offline: 'You\'re offline. Connect and try again.',
+    authErr_providerDisabled: 'This sign-in method isn\'t enabled for the shop yet.',
+    authErr_unauthorizedDomain: 'Sign-in isn\'t allowed on this web address yet.',
+    authErr_generic: 'Sign-in didn\'t work. Please try again.',
+    fontPreview: 'Preview',
+    authCustomerLead: 'Sign in with Google to keep your order history on every device and to leave reviews.',
+    authGoogleBtn: 'Continue with Google',
+    authGuestNote: 'No account needed to order — just add your name when you send your order.',
+    authOr: 'or',
+    btnSave: 'Save',
+    btnSendReview: 'Send review',
+    btnStaffLogin: 'Sign in',
+    checkoutAddressOptional: 'Delivery address (optional for pickup)',
+    checkoutDetailsLegend: 'Your details',
+    checkoutDoneClear: 'I sent it — clear the tray',
+    checkoutNameLabel: 'Name *',
+    checkoutOpenAgain: 'Open WhatsApp',
+    checkoutPhoneLabel: 'Phone (optional)',
+    checkoutRemember: 'Remember my details on this device',
+    labelEmail: 'Email',
+    leaveReviewDescModerated: 'Tell us about your cake. Reviews appear after the bakery approves them.',
+    perm_faq: 'FAQ',
+    perm_reviews: 'Reviews',
+    reviewRatingLabel: 'Your rating',
+    reviewSignInNeeded: 'Please sign in with Google so we can make sure reviews come from real customers.',
+    staffEntryLead: 'The person signs in with their own Google or email account. Copy their User UID from Firebase Authentication.',
+    staffEntryTitle: 'Staff member',
+    staffLoginLead: 'For the bakery team. Access is granted by the shop owner.',
+    staffLoginLink: 'Staff sign-in',
+    staffLoginTitle: 'Staff sign-in',
+    staffPermsLegend: 'Sections staff can edit',
+    staffUidLabel: 'User UID',
+    trayHeading: 'Your order',
+    trayYourOrder: 'Your order',
+    trayCloseDetails: 'Close order details',
+    trayItemsListLabel: 'Items in your order',
+    btnClosePanel: 'Close control panel',
+    colPhone: 'Phone',
   },
   ku: {
     btnCancel: "پاشگەزبوونەوە",
@@ -965,7 +1084,7 @@ fontPreview: 'Preview',
     economyTitle: "نرخدانان و ئابووری",
     economyDesc: "بەڕێوەبردنی نرخی ئاڵوگۆڕ، کرێی گەیاندن و مەرجەکانی کەمترین داواکاری.",
     shopTagline: 'شیرینەمەنی دەستکردی نایاب',
-    announcementText: 'پێشوەختە داوا بکە بۆ ئاهەنگەکانی کۆتایی هەفتە! <strong>گەیاندنی خۆڕایی</strong> بۆ داواکاری سەروو $50.',
+    announcementText: 'پێشوەختە داوا بکە بۆ ئاهەنگەکانی کۆتایی هەفتە! <strong>گەیاندنی خۆڕایی</strong> بۆ داواکاری سەروو {freeDelivery}.',
     navMenu: 'لیستی شیرینی',
     navHowItWorks: 'شێوازی داواکردن',
     navOurStory: 'چیرۆکی ئێمە',
@@ -1216,6 +1335,10 @@ fontPreview: 'پێشبینین',
     economyPreviewSample: 'داواکاری نموونە: 50 دۆلار کۆی لاوەکی',
     trayDetails: 'وردەکاری ▾',
     trayDetailsClose: 'داخستن ▴',
+    trayDateLabel: 'بەروار و کاتی گەیاندن یان وەرگرتن *',
+    trayPaymentNote: 'پارەدان لە کاتی گەیاندن. کرێی گەیاندن لە واتسئاپ پشتڕاست دەکەینەوە.',
+    inOrderCount: '{n} لە داواکارییەکەتدا',
+    skipToMenu: 'بڕۆ بۆ لیستی شیرینی',
     trayApplyPromo: 'جێبەجێکردن',
     trayRemovePromo: 'سڕینەوە',
     trayPromoPlaceholder: 'کۆدی داشکاندن',
@@ -1317,7 +1440,158 @@ fontPreview: 'پێشبینین',
     themePresetSage:'سەیج',
     themePresetRose:'گۆڵ',
     themePresetMidnight:'نیوەشەو',
-    themeAutoDark:'چالاککردنی باری تاریکی خۆکار'
+    themeAutoDark:'چالاککردنی باری تاریکی خۆکار',
+    // Added in v3: accounts, checkout, moderation and save states
+    btnClose: 'داخستن',
+    btnConfirm: 'دڵنیاکردنەوە',
+    confirmTitle: 'دڵنیایت؟',
+    errFillFields: 'تکایە خانە پێویستەکان پڕبکەرەوە.',
+    errInvalidUrl: 'ناونیشانێکی تەواو بنووسە کە بە https:// دەست پێدەکات',
+    errInvalidWhatsApp: 'ژمارەی واتسئاپ بە شێوەی نێودەوڵەتی بنووسە، بۆ نموونە 9647501234567.',
+    loginSuccess: 'چوویتە ژوورەوە.',
+    sessionExpired: 'ماوەی چوونەژوورەوەی کارمەند تەواو بووە. تکایە دووبارە بچۆ ژوورەوە.',
+    staffAccessGranted: 'چوویتە ژوورەوە. پانێڵی کۆنترۆڵ دەکرێتەوە.',
+    staffNoAccess: 'ئەم هەژمارە دەسەڵاتی کارمەندی نییە. داوا لە خاوەنی دوکان بکە زیادت بکات.',
+    syncOffline: 'پەیوەندیت بە ئینتەرنێتەوە نییە. ئەو لیستەی لەسەر ئەم ئامێرە پاشەکەوت کراوە پیشان دەدرێت.',
+    saveNeedsSignIn: 'بۆ پاشەکەوتکردن بە هەژماری کارمەند بچۆ ژوورەوە.',
+    saveOffline: 'پاشەکەوت نەکرا: پەیوەندیت نییە. گۆڕانکارییەکانت لە فۆڕمەکەدا ماونەتەوە — کاتێک پەیوەندیت هەبوو دووبارە هەوڵ بدەرەوە.',
+    saveDenied: 'پاشەکەوت نەکرا: هەژمارەکەت ڕێگەی گۆڕینی ئەم بەشەی نییە.',
+    saveInvalid: 'پاشەکەوت نەکرا: هەندێک بەها دروست نین. فۆڕمەکە بپشکنە و دووبارە هەوڵ بدەرەوە.',
+    saveFailed: 'پاشەکەوت نەکرا: هەڵەیەک ڕوویدا. گۆڕانکارییەکانت لە فۆڕمەکەدا ماونەتەوە — دووبارە هەوڵ بدەرەوە.',
+    statusSaving: 'پاشەکەوت دەکرێت…',
+    statusSaved: 'هەموو گۆڕانکارییەکان پاشەکەوت کران',
+    statusFailed: 'دوایین گۆڕانکاری پاشەکەوت نەکرا',
+    menuNoProducts: 'لیستی شیرینی نوێ دەکرێتەوە. تکایە دواتر سەردان بکەرەوە.',
+    cartEach: 'دانەی {price}',
+    cartQtyLabel: 'ژمارەی {name}',
+    cartDecrease: 'یەک دانە کەمتر لە {name}',
+    cartIncrease: 'یەک دانە زیاتر لە {name}',
+    cartRemove: 'لابردنی {name}',
+    cartItemRemoved: '{name} لە داواکارییەکەت لابرا.',
+    cartClearTitle: 'داواکارییەکەت بسڕیتەوە؟',
+    cartClearConfirm: 'هەموو کاڵاکان لە سەبەتەکەت لادەبرێن.',
+    trayItemsLabel: '{n} کاڵا',
+    pickupOnlyLabel: 'وەرگرتن لە چێشتخانەکەمان',
+    trayDateHint: 'لانیکەم {hours} کاتژمێرمان پێویستە. زووترین کات: {date}.',
+    checkoutNeedName: 'ناوەکەت بنووسە تا شیرینیخانەکە بزانێت داواکارییەکە بۆ کێیە.',
+    checkoutNeedDate: 'بەروار و کاتی گەیاندن یان وەرگرتن هەڵبژێرە.',
+    checkoutBadDate: 'ئەو بەروارە دروست نییە. دووبارە لە ڕۆژژمێرەکە هەڵیبژێرە.',
+    checkoutDateTooSoon: 'لانیکەم {hours} کاتژمێرمان پێویستە بۆ ئامادەکردن. زووترین کات {date}ە.',
+    checkoutDateTooFar: 'تکایە بەروارێک لە ماوەی ١٢ مانگی داهاتوودا هەڵبژێرە.',
+    checkoutNoWhatsApp: 'داواکردن لە ڕێگەی واتسئاپ هێشتا ئامادە نییە. تکایە ڕاستەوخۆ پەیوەندی بە شیرینیخانەکەوە بکە.',
+    checkoutOpened: 'واتسئاپ کرایەوە. ناردنی داواکارییەکەت لە واتسئاپدا تەواو بکە.',
+    checkoutBlocked: 'واتسئاپ خۆکارانە نەکرایەوە. بۆ ناردنی داواکارییەکەت بەستەری خوارەوە بەکاربهێنە.',
+    checkoutAgainTitle: 'ئەم داواکارییە دووبارە بنێریت؟',
+    checkoutAgainConfirm: 'پێشتر هەمان داواکاریت لە واتسئاپ کردەوە. دووبارە بیکەیتەوە؟',
+    checkoutAgainOk: 'دووبارە کردنەوەی واتسئاپ',
+    checkoutAddressLabel: 'ناونیشانی گەیاندن',
+    orderSavedToHistory: 'داواکارییەکە لە مێژووی داواکارییەکانت پاشەکەوت کرا.',
+    orderHistorySaveFailed: 'نامەی داواکارییەکەت لە واتسئاپ ئامادەیە، بەڵام نەتوانرا لە مێژووی داواکارییە ئۆنلاینەکانت پاشەکەوت بکرێت.',
+    trayClearedAfterSend: 'سەبەتەی داواکاری پاککرایەوە.',
+    myOrdersBtn: 'داواکارییەکانم',
+    myOrdersHideDetails: 'شاردنەوەی وردەکاری',
+    historyScopeAccount: 'ئەو داواکارییانەی بە هەژمارەکەتەوە بەستراون، لەگەڵ ئەوانەی لەم ئامێرەوە نێردراون.',
+    historyScopeDevice: 'ئەو داواکارییانەی لەم ئامێرەوە نێردراون. بچۆ ژوورەوە بۆ پاراستنی مێژووەکەت لە هەموو ئامێرەکاندا.',
+    historyRequestedFor: 'داواکراو بۆ',
+    orderStatusSent: 'لە واتسئاپ نێردرا',
+    orderStatusConfirmed: 'پشتڕاستکرایەوە',
+    orderStatusCompleted: 'تەواو بوو',
+    customerFallbackName: 'کڕیار',
+    contactNotSet: 'زانیاری پەیوەندی بەم زووانە زیاد دەکرێت.',
+    customersScopeHint: 'ئەو کڕیارانەی هەژماریان هەیە و دوایین ٢٠٠ داواکاری پیشان دەدات.',
+    darkModeOn: 'دۆخی تاریک چالاکە',
+    darkModeOff: 'دۆخی ڕووناک چالاکە',
+    reviewVerifiedRole: 'کڕیار',
+    reviewStarsLabel: '{n} لە ٥ ئەستێرە',
+    reviewsEmpty: 'هێشتا هیچ ڕایەک نییە. یەکەم کەس بە ڕاکەت بڵێ.',
+    reviewPending: 'سوپاس! ڕاکەت دوای پەسەندکردنی شیرینیخانەکە دەردەکەوێت.',
+    reviewDenied: 'ڕاکەت نەنێردرا. تکایە دووبارە بچۆ ژوورەوە و هەوڵ بدەرەوە.',
+    reviewFailed: 'ڕاکەت نەنێردرا. تکایە دووبارە هەوڵ بدەرەوە.',
+    reviewsPendingTitle: 'چاوەڕێی پەسەندکردن',
+    reviewsPendingEmpty: 'هیچ ڕایەک چاوەڕێ ناکات.',
+    reviewsDecidedTitle: 'بەم دواییانە بڕیاری لەسەر دراوە',
+    reviewApprove: 'پەسەندکردن',
+    reviewReject: 'ڕەتکردنەوە',
+    reviewUnpublish: 'لابردن لە پیشاندان',
+    reviewApproved: 'ڕاکە بڵاوکرایەوە.',
+    reviewRejected: 'ڕاکە شاردرایەوە.',
+    reviewDeleteConfirm: 'ئەم ڕایە بە یەکجاری بسڕیتەوە؟',
+    reviewsCuratedTitle: 'ڕا هەڵبژێردراوەکان',
+    reviewsCuratedHint: 'ئەو ڕایانەی لێرە زیادی دەکەیت وەک خۆیان لە ماڵپەڕەکەدا دەردەکەون.',
+    reviewsResetBtn: 'گەڕاندنەوەی بنەڕەت',
+    reviewsResetTitle: 'ڕا بنەڕەتییەکان بگەڕێنیتەوە؟',
+    reviewsResetConfirm: 'ڕا هەڵبژێردراوەکانت بە سێ ڕا سەرەتاییەکە دەگۆڕدرێن.',
+    reviewsAddBtn: 'زیادکردنی ڕا',
+    tabBrand: 'براند و لۆگۆ',
+    tabAbout: 'دەربارەی ئێمە',
+    tabFaq: 'پرسیارە باوەکان',
+    tabReviews: 'ڕاکان',
+    tabContact: 'پەیوەندی',
+    tabSocials: 'تۆڕە کۆمەڵایەتییەکان',
+    tabProducts: 'بەرهەمەکان',
+    tabUsers: 'کارمەندان',
+    tabData: 'داتا',
+    usersClaimsHint: 'دەسەڵاتی کارمەندان لەلایەن خاوەنی دوکانەوە بە فەرمانێکی یەکجاری دەدرێت. لێرە کەسەکان زیاد یان بگۆڕە، پاشان ئەمە جێبەجێ بکە:',
+    staffUidInvalid: 'User UIDی کەسەکە لە Firebase Authenticationەوە دابنێ.',
+    staffSavedHint: 'پاشەکەوت کرا. فەرمانی کارمەندان جێبەجێ بکە تا گۆڕانکارییەکە کاریگەر بێت، پاشان داوایان لێبکە دووبارە بچنە ژوورەوە.',
+    staffRemovedHint: 'لە لیستەکە لابرا. فەرمانی کارمەندان جێبەجێ بکە بۆ هەڵوەشاندنەوەی دەسەڵاتەکەیان.',
+    prodDeleteTitle: 'ئەم بەرهەمە بسڕیتەوە؟',
+    prodNewDraft: 'بەرهەمێکی نوێ دروستکرا. پڕی بکەرەوە و پاشەکەوت دابگرە بۆ بڵاوکردنەوە.',
+    prodPhotoRemovedPending: 'وێنەکە لابرا. بۆ جێبەجێکردن پاشەکەوت دابگرە.',
+    prodPriceInvalid: 'نرخێک لە نێوان ٠ و ١٠٠،٠٠٠ بنووسە.',
+    importTitle: 'ئەم باکئەپە هاوردە بکەیت؟',
+    importConfirm: 'ڕێکخستنەکانی دوکان دەگۆڕدرێن و هەموو بەرهەمەکانی ناو باکئەپەکە نوێ دەکرێنەوە.',
+    importBtn: 'هاوردەکردنی باکئەپ',
+    resetDeviceTitle: 'ڕێکخستنەوەی ئەم ئامێرە',
+    resetDeviceBtn: 'سڕینەوەی داتای ئەم ئامێرە',
+    resetDeviceHint: 'لیستی شیرینی، ڕێکخستنەکان و مێژووی داواکاری پاشەکەوتکراو لەم وێبگەڕەدا دەسڕێتەوە. دوکانە زیندووەکە ناگۆڕدرێت.',
+    resetDeviceConfirm: 'هەموو داتای پاشەکەوتکراوی ئەم وێبگەڕە بسڕیتەوە؟ دوکانە زیندووەکە ناگۆڕدرێت.',
+    resetDeviceDone: 'ئەم ئامێرە ڕێکخرایەوە. داتای دوکان دووبارە بار دەکرێتەوە.',
+    leadTimeLabel: 'کاتی ئامادەکردن (کاتژمێر)',
+    leadTimeHint: 'کڕیاران ناتوانن کاتی گەیاندنێکی زووتر لەمە هەڵبژێرن.',
+    authErr_popupClosed: 'چوونەژوورەوە هەڵوەشێنرایەوە.',
+    authErr_popupBlocked: 'وێبگەڕەکەت پەنجەرەی چوونەژوورەوەی ڕاگرت. ڕێگە بە pop-up بدە و دووبارە هەوڵ بدەرەوە.',
+    authErr_badCredentials: 'ئیمەیڵ و وشەی نهێنی یەک ناگرنەوە.',
+    authErr_badEmail: 'ئەو ئیمەیڵە دروست نییە.',
+    authErr_tooMany: 'هەوڵی زۆر درا. چەند خولەکێک چاوەڕێ بکە و دووبارە هەوڵ بدەرەوە.',
+    authErr_offline: 'پەیوەندیت نییە. پەیوەندی بکە و دووبارە هەوڵ بدەرەوە.',
+    authErr_providerDisabled: 'ئەم شێوازی چوونەژوورەوەیە هێشتا بۆ دوکانەکە چالاک نەکراوە.',
+    authErr_unauthorizedDomain: 'چوونەژوورەوە لەسەر ئەم ناونیشانە هێشتا ڕێگەپێدراو نییە.',
+    authErr_generic: 'چوونەژوورەوە سەرکەوتوو نەبوو. تکایە دووبارە هەوڵ بدەرەوە.',
+    fontPreview: 'پێشبینین',
+    authCustomerLead: 'بە Google بچۆ ژوورەوە بۆ پاراستنی مێژووی داواکارییەکانت لە هەموو ئامێرێکدا و نووسینی ڕا.',
+    authGoogleBtn: 'بەردەوامبوون بە Google',
+    authGuestNote: 'بۆ داواکردن پێویستت بە هەژمار نییە — تەنها ناوەکەت بنووسە کاتێک داواکارییەکەت دەنێریت.',
+    authOr: 'یان',
+    btnSave: 'پاشەکەوتکردن',
+    btnSendReview: 'ناردنی ڕا',
+    btnStaffLogin: 'چوونەژوورەوە',
+    checkoutAddressOptional: 'ناونیشانی گەیاندن (بۆ وەرگرتن پێویست نییە)',
+    checkoutDetailsLegend: 'زانیارییەکانت',
+    checkoutDoneClear: 'ناردم — سەبەتەکە پاک بکەرەوە',
+    checkoutNameLabel: 'ناو *',
+    checkoutOpenAgain: 'کردنەوەی واتسئاپ',
+    checkoutPhoneLabel: 'ژمارەی مۆبایل (ئارەزوومەندانە)',
+    checkoutRemember: 'زانیارییەکانم لەسەر ئەم ئامێرە بهێڵەرەوە',
+    labelEmail: 'ئیمەیڵ',
+    leaveReviewDescModerated: 'باسی کێکەکەت بۆمان بکە. ڕاکان دوای پەسەندکردنی شیرینیخانەکە دەردەکەون.',
+    perm_faq: 'پرسیارە باوەکان',
+    perm_reviews: 'ڕاکان',
+    reviewRatingLabel: 'هەڵسەنگاندنەکەت',
+    reviewSignInNeeded: 'تکایە بە Google بچۆ ژوورەوە تا دڵنیا بین ڕاکان لە کڕیارانی ڕاستەقینەوەن.',
+    staffEntryLead: 'کەسەکە بە هەژماری Google یان ئیمەیڵی خۆی دەچێتە ژوورەوە. User UIDەکەی لە Firebase Authenticationەوە کۆپی بکە.',
+    staffEntryTitle: 'کارمەند',
+    staffLoginLead: 'بۆ تیمی شیرینیخانە. دەسەڵات لەلایەن خاوەنی دوکانەوە دەدرێت.',
+    staffLoginLink: 'چوونەژوورەوەی کارمەندان',
+    staffLoginTitle: 'چوونەژوورەوەی کارمەندان',
+    staffPermsLegend: 'ئەو بەشانەی کارمەند دەتوانێت دەستکاری بکات',
+    staffUidLabel: 'User UID',
+    trayHeading: 'داواکارییەکەت',
+    trayYourOrder: 'داواکارییەکەت',
+    trayCloseDetails: 'داخستنی وردەکاری داواکاری',
+    trayItemsListLabel: 'کاڵاکانی ناو داواکارییەکەت',
+    btnClosePanel: 'داخستنی پانێڵی کۆنترۆڵ',
+    colPhone: 'مۆبایل',
   }
 };
 
@@ -1327,15 +1601,23 @@ const app = {
   currency: 'USD',
   category: 'all',
   config: null,
-  users: null,
   products: null,
   selectedProductId: null,
   pendingImageData: '',
-  session: null,
-  order: [], // [{ id, productId, qty, exclude }]
+  session: null, // Derived from Firebase Auth + token claims only (see lib/session.js)
+  profile: null, // Signed-in customer's own profile document
+  cart: [], // [{ id, productId, qty, exclude }] — persisted under ys_cart_v1, no prices stored
   orderNote: '',
-  orders: [], // Array of historical order records (sc_orders_v2)
-  customerNotes: {}, // Private staff notes for customers { [customerId]: noteText }
+  myOrders: [], // Signed-in customer's orders (Firestore)
+  localOrders: [], // Orders sent from this device (guests included)
+  approvedReviews: [], // Moderated customer reviews
+  staffOrders: [], // Staff-only listeners
+  customers: [],
+  allReviews: [],
+  staffDirectory: [],
+  configSource: 'default', // default | legacy | public
+  syncState: 'connecting',
+  checkoutInFlight: false,
   appliedPromoCode: '', // Active coupon applied in storefront cart
   trayBreakdownOpen: false, // Order tray breakdown open/closed toggle
   activePanelTab: 'brand',
@@ -1357,8 +1639,8 @@ const app = {
   },
   
   init() {
+    this.purgeLegacyStorage();
     this.loadState();
-    this.initFirebaseSync();
     this.parseUrlHash();
     this.applyTheme(this.config.theme.tokens);
     this.applyFonts();
@@ -1367,295 +1649,413 @@ const app = {
     this.updateFavicon();
     this.bindEvents();
     this.setupIntersectionObserver();
+    this.initFirebaseSync();
+    this.initSession();
+    if (window.location.hash === '#staff') this.openStaffLogin();
   },
 
-  initFirebaseSync() {
-    if (!db) return;
-    
-    // Config
-    onSnapshot(doc(db, 'config', 'main'), (docSnap) => {
-      if (docSnap.exists()) {
-        const remoteConfig = docSnap.data();
-        if (JSON.stringify(this.config) !== JSON.stringify(remoteConfig)) {
-          this.config = remoteConfig;
-          localStorage.setItem(KEYS.CONFIG, JSON.stringify(this.config));
-          this.applyTheme(this.config.theme.tokens);
-          this.applyFonts();
-          this.renderAll();
-        }
-      }
-    }, (e) => handleFirestoreError(e, OperationType.GET, 'config/main'));
+  purgeLegacyStorage() {
+    LEGACY_KEYS.forEach(k => {
+      try { localStorage.removeItem(k); } catch { /* storage unavailable */ }
+    });
+  },
 
-    // Products
-    onSnapshot(collection(db, 'products'), (snap) => {
-      if (!snap.empty) {
-        this.products = snap.docs.map(d => d.data());
-        localStorage.setItem(KEYS.PRODUCTS, JSON.stringify(this.products));
-        this.renderAll();
-      }
-    }, (e) => handleFirestoreError(e, OperationType.GET, 'products'));
-
-    let usersUnsub, ordersUnsub;
-    
-    if (auth) {
-      onAuthStateChanged(auth, (user) => {
-        if (usersUnsub) { usersUnsub(); usersUnsub = null; }
-        if (ordersUnsub) { ordersUnsub(); ordersUnsub = null; }
-        
-        if (user) {
-          const isAdmin = ['qaessafty@gmail.com', 'yumy.swets@gmail.com'].includes(user.email.toLowerCase()) || ['admin', 'dev', 'staff'].includes(this.session?.user?.role);
-          
-          if (isAdmin) {
-            usersUnsub = onSnapshot(collection(db, 'users'), (snap) => {
-              if (!snap.empty) {
-                this.users = snap.docs.map(d => d.data());
-                localStorage.setItem(KEYS.USERS, JSON.stringify(this.users));
-                this.renderAll();
-              }
-            }, (e) => handleFirestoreError(e, OperationType.GET, 'users'));
-
-            ordersUnsub = onSnapshot(collection(db, 'orders'), (snap) => {
-              if (!snap.empty) {
-                this.orders = snap.docs.map(d => d.data());
-                localStorage.setItem(KEYS.ORDERS, JSON.stringify(this.orders));
-                this.renderAll();
-              }
-            }, (e) => handleFirestoreError(e, OperationType.GET, 'orders'));
-          } else {
-            usersUnsub = onSnapshot(doc(db, 'users', user.uid), (docSnap) => {
-              if (docSnap.exists()) {
-                const uData = docSnap.data();
-                const idx = this.users.findIndex(u => u.id === user.uid);
-                if (idx > -1) this.users[idx] = uData;
-                else this.users.push(uData);
-                localStorage.setItem(KEYS.USERS, JSON.stringify(this.users));
-                this.renderAll();
-              }
-            }, (e) => handleFirestoreError(e, OperationType.GET, 'users'));
-
-            ordersUnsub = onSnapshot(query(collection(db, 'orders'), where('customerId', '==', user.uid)), (snap) => {
-              if (!snap.empty) {
-                this.orders = snap.docs.map(d => d.data());
-                localStorage.setItem(KEYS.ORDERS, JSON.stringify(this.orders));
-                this.renderAll();
-              }
-            }, (e) => handleFirestoreError(e, OperationType.GET, 'orders'));
-          }
-        }
-      });
+  cacheGet(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch {
+      return fallback;
     }
   },
 
-  // State & LocalStorage Helpers
-  loadState() {
+  cacheSet(key, value) {
     try {
-      this.config = JSON.parse(localStorage.getItem(KEYS.CONFIG)) || JSON.parse(JSON.stringify(DEFAULT_CONFIG));
-    } catch {
-      this.config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
-    }
-    // Brand name migration check
-    if (this.config && this.config.shopName && (this.config.shopName.en === 'Sweet Crumb' || !this.config.shopName.en)) {
-      this.config.shopName.en = 'Yummy Sweets';
-      this.config.shopName.ku = 'یامی سویتس';
-      if (this.config.aboutUs && this.config.aboutUs.en && this.config.aboutUs.en.includes('Sweet Crumb')) {
-        this.config.aboutUs.en = this.config.aboutUs.en.replace(/Sweet Crumb/g, 'Yummy Sweets');
-      }
-      if (this.config.aboutUs && this.config.aboutUs.ku && this.config.aboutUs.ku.includes('سویت کرەمب')) {
-        this.config.aboutUs.ku = this.config.aboutUs.ku.replace(/سویت کرەمب/g, 'یامی سویتس');
-      }
-      if (this.config.contact && this.config.contact.email === 'hello@sweetcrumb.com') {
-        this.config.contact.email = 'hello@yummysweets.com';
-      }
-      this.saveConfig();
-    }
-    // Ensure socials exist and merge newly added networks for existing configs
-      if (!this.config.socials || typeof this.config.socials !== 'object') {
-        this.config.socials = JSON.parse(JSON.stringify(DEFAULT_CONFIG.socials));
-      } else {
-        this.config.socials = { ...JSON.parse(JSON.stringify(DEFAULT_CONFIG.socials)), ...this.config.socials };
-      }
-
-      // Ensure font settings exist
-    if (this.config) {
-      if (!this.config.kurdishBodyFont) this.config.kurdishBodyFont = 'Vazirmatn';
-      if (!this.config.kurdishDisplayFont) this.config.kurdishDisplayFont = 'Vazirmatn';
-      
-      // Ensure logo settings exist and migrate legacy config
-      if (!this.config.theme) {
-        this.config.theme = { presetId: 'berry', tokens: THEMES.berry.tokens };
-      }
-      if (!this.config.faq) {
-        this.config.faq = [...DEFAULT_CONFIG.faq];
-      }
-      if (!this.config.reviews) {
-        this.config.reviews = [...DEFAULT_CONFIG.reviews];
-      }
-      if (!this.config.logoMode) {
-        this.config.logoMode = this.config.logoImage ? 'image' : (this.config.logoImageUrl ? 'url' : 'emoji');
-      }
-      if (!this.config.logoEmoji) {
-        this.config.logoEmoji = '🎂';
-      }
-      if (typeof this.config.logoImage !== 'string') {
-        this.config.logoImage = '';
-      }
-      if (typeof this.config.logoUrl !== 'string') {
-        this.config.logoUrl = this.config.logoImageUrl || '';
-      }
-      if (!this.config.logoImageUrl && this.config.logoUrl) {
-        this.config.logoImageUrl = this.config.logoUrl;
-      }
-
-      // Ensure economy settings exist & migrate legacy iqdRate
-      if (!this.config.economy || typeof this.config.economy !== 'object') {
-        this.config.economy = JSON.parse(JSON.stringify(DEFAULT_ECONOMY));
-      } else {
-        this.config.economy = { ...DEFAULT_ECONOMY, ...this.config.economy };
-      }
-      if (typeof this.config.iqdRate === 'number' && this.config.iqdRate > 0) {
-        if (!this.config.economy.exchangeRate || this.config.economy.exchangeRate === 1310) {
-          this.config.economy.exchangeRate = this.config.iqdRate;
-        }
-      }
-    }
-
-    try {
-      this.users = JSON.parse(localStorage.getItem(KEYS.USERS)) || JSON.parse(JSON.stringify(DEFAULT_USERS));
-    } catch {
-      this.users = JSON.parse(JSON.stringify(DEFAULT_USERS));
-    }
-
-    // Ensure super admin account for yumy.swets@gmail.com exists
-    let yumyAdmin = Array.isArray(this.users) && this.users.find(u => 
-      (u.email && u.email.toLowerCase() === 'yumy.swets@gmail.com') ||
-      (u.username && (u.username.toLowerCase() === 'yumy.swets' || u.username.toLowerCase() === 'yumy.swets@gmail.com'))
-    );
-    if (!yumyAdmin) {
-      if (!Array.isArray(this.users)) this.users = JSON.parse(JSON.stringify(DEFAULT_USERS));
-      this.users.push({
-        id: 'dmfw78AEPYW1htK7rgqptaFRqs03',
-        username: 'yumy.swets',
-        email: 'yumy.swets@gmail.com',
-        password: 'YummyAdmin2026!',
-        name: 'Yummy Sweets Admin',
-        role: 'admin'
-      });
-      this.saveUsers();
-    } else {
-      yumyAdmin.email = 'yumy.swets@gmail.com';
-      yumyAdmin.role = 'admin';
-      if (!yumyAdmin.password) {
-        yumyAdmin.password = 'YummyAdmin2026!';
-      }
-      if (!yumyAdmin.username) {
-        yumyAdmin.username = 'yumy.swets';
-      }
-    }
-
-    try {
-      this.products = JSON.parse(localStorage.getItem(KEYS.PRODUCTS)) || JSON.parse(JSON.stringify(DEFAULT_PRODUCTS));
-    } catch {
-      this.products = JSON.parse(JSON.stringify(DEFAULT_PRODUCTS));
-    }
-
-    // Ensure all products have img property, backfilling defaults if empty
-    if (Array.isArray(this.products)) {
-      const defaultMap = new Map(DEFAULT_PRODUCTS.map(dp => [dp.id, dp]));
-      let hadChanges = false;
-      this.products.forEach(p => {
-        if (typeof p.img !== 'string') p.img = '';
-        if (!p.img.trim() && defaultMap.has(p.id)) {
-          p.img = defaultMap.get(p.id).img || '';
-          hadChanges = true;
-        }
-      });
-      if (hadChanges) {
-        this.saveProducts();
-      }
-      if (!this.selectedProductId && this.products.length > 0) {
-        this.selectedProductId = this.products[0].id;
-        this.pendingImageData = this.products[0].img || '';
-      }
-    }
-
-    try {
-      this.session = JSON.parse(localStorage.getItem(KEYS.SESSION)) || null;
-    } catch {
-      this.session = null;
-    }
-
-    try {
-      this.orders = JSON.parse(localStorage.getItem(KEYS.ORDERS)) || [];
-    } catch {
-      this.orders = [];
-    }
-
-    try {
-      this.customerNotes = JSON.parse(localStorage.getItem(KEYS.CUSTOMER_NOTES)) || {};
-    } catch {
-      this.customerNotes = {};
-    }
-
-    try {
-      const pref = JSON.parse(localStorage.getItem(KEYS.PREF));
-      if (pref) {
-        if (pref.lang) this.lang = pref.lang;
-        if (pref.currency) this.currency = pref.currency;
-      }
-    } catch {
-      this.lang = 'en';
-      this.currency = 'USD';
-    }
-  },
-
-  saveConfig() {
-    localStorage.setItem(KEYS.CONFIG, JSON.stringify(this.config));
-    if (db) setDoc(doc(db, 'config', 'main'), this.config).catch(e => handleFirestoreError(e, OperationType.WRITE, 'config/main'));
-  },
-  saveUsers() {
-    localStorage.setItem(KEYS.USERS, JSON.stringify(this.users));
-    if (db) {
-      const batch = writeBatch(db);
-      this.users.forEach(u => batch.set(doc(db, 'users', u.id), u));
-      batch.commit().catch(e => handleFirestoreError(e, OperationType.WRITE, 'users'));
-    }
-  },
-  saveOrders() {
-    localStorage.setItem(KEYS.ORDERS, JSON.stringify(this.orders));
-    if (db) {
-      const batch = writeBatch(db);
-      this.orders.forEach(o => batch.set(doc(db, 'orders', o.id), o));
-      batch.commit().catch(e => handleFirestoreError(e, OperationType.WRITE, 'orders'));
-    }
-  },
-  saveCustomerNotes() {
-    localStorage.setItem(KEYS.CUSTOMER_NOTES, JSON.stringify(this.customerNotes));
-  },
-  saveProducts() {
-    try {
-      localStorage.setItem(KEYS.PRODUCTS, JSON.stringify(this.products));
-      if (db) {
-        const batch = writeBatch(db);
-        this.products.forEach(p => batch.set(doc(db, 'products', p.id), p));
-        batch.commit().catch(e => handleFirestoreError(e, OperationType.WRITE, 'products'));
-      }
+      localStorage.setItem(key, JSON.stringify(value));
       return true;
     } catch (e) {
-      console.error('Storage quota error:', e);
-      this.showToast(this.t('storageQuotaError'), 'error');
+      console.warn('Could not cache', key, e && e.name);
       return false;
     }
   },
-  saveSession() {
-    if (this.session) {
-      localStorage.setItem(KEYS.SESSION, JSON.stringify(this.session));
-    } else {
-      localStorage.removeItem(KEYS.SESSION);
+
+
+  // Public storefront data. Private (staff/customer) listeners start in startPrivateListeners().
+  // Public storefront data: one-time Firestore Lite reads, refreshed when the tab regains focus.
+  // Staff sessions also get realtime updates (startPrivateListeners).
+  initFirebaseSync() {
+    if (!firebaseReady()) {
+      this.setSyncState('offline');
+      return;
+    }
+    this.refreshPublicData();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && Date.now() - (this._lastPublicFetch || 0) > 60_000) this.refreshPublicData();
+    });
+  },
+
+  async refreshPublicData() {
+    this._lastPublicFetch = Date.now();
+    const results = await Promise.allSettled([fetchPublicConfig(), fetchProducts(), fetchApprovedReviews()]);
+    const [config, products, reviews] = results;
+    if (results.every(r => r.status === 'rejected')) {
+      this.reportListenerError('storefront', results[0].reason);
+      return;
+    }
+    this.setSyncState('online');
+    if (config.status === 'fulfilled') this.applyRemoteConfig(config.value.data, config.value.source);
+    else this.reportListenerError('config', config.reason);
+    if (products.status === 'fulfilled') this.applyRemoteProducts(products.value.list, products.value.empty);
+    else this.reportListenerError('products', products.reason);
+    if (reviews.status === 'fulfilled') { this.approvedReviews = reviews.value; this.renderReviews(); }
+    else this.reportListenerError('reviews', reviews.reason);
+  },
+
+  applyRemoteConfig(data, source) {
+    this.configSource = source;
+    if (!data) return;
+    const next = this.normalizeConfig(data);
+    if (JSON.stringify(next) === JSON.stringify(this.config)) return;
+    this.config = next;
+    this.cacheSet(KEYS.CONFIG, this.config);
+    this.applyTheme(this.config.theme.tokens);
+    this.applyFonts();
+    this.applyPreferences();
+    this.renderAll();
+    this.refreshOpenPanel();
+  },
+
+  applyRemoteProducts(list, empty) {
+    // An empty collection on a shop that never stored products keeps the built-in menu.
+    // Once products have been stored remotely, an empty collection really means "no products".
+    if (empty && !this.cacheGet(KEYS.PRODUCTS_REMOTE, false)) return;
+    if (!empty) this.cacheSet(KEYS.PRODUCTS_REMOTE, true);
+    this.products = list.map(p => this.normalizeProduct(p)).filter(Boolean);
+    this.cacheSet(KEYS.PRODUCTS, this.products);
+    this.cart = sanitizeCart(this.cart, this.products);
+    this.persistCart();
+    this.renderMenu();
+    this.renderTray();
+    this.refreshOpenPanel(['products']);
+  },
+
+
+  setSyncState(state) {
+    if (this.syncState === state) return;
+    this.syncState = state;
+    const el = document.getElementById('syncNotice');
+    if (!el) return;
+    const show = state === 'offline';
+    el.hidden = !show;
+    el.textContent = show ? this.t('syncOffline') : '';
+  },
+
+  reportListenerError(name, err) {
+    const kind = describeDataError(err);
+    if (kind === 'offline') this.setSyncState('offline');
+    else console.warn(`Live updates for ${name} stopped (${kind}).`);
+  },
+
+  // Re-render the open control-panel tab when data it shows has changed.
+  refreshOpenPanel(tabs = null) {
+    const modal = document.getElementById('panelModal');
+    if (!modal || !modal.classList.contains('is-open')) return;
+    if (tabs && !tabs.includes(this.activePanelTab)) return;
+    // Leave forms alone while someone is typing in them.
+    const content = document.getElementById('panelContent');
+    if (content && content.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    this.renderPanelTab(this.activePanelTab);
+  },
+
+  // ---------------------------------------------------------------- session
+  async initSession(force = false) {
+    if (this._sessionUnsub && !force) return;
+    if (this._sessionUnsub) { this._sessionUnsub(); this._sessionUnsub = null; }
+    try {
+      this._sessionUnsub = await watchSession(s => this.applySession(s), { force });
+    } catch (e) {
+      console.warn('Sign-in is unavailable:', e && e.message);
+      this.applySession(null);
     }
   },
-  savePref() {
-    localStorage.setItem(KEYS.PREF, JSON.stringify({ lang: this.lang, currency: this.currency }));
+
+  applySession(session) {
+    if (session && session.expired) {
+      this.showToast(this.t('sessionExpired'), 'warning');
+      signOutUser().catch(() => {});
+      session = null;
+    }
+    const key = s => (s ? `${s.uid}|${s.role}|${s.perms.join(',')}` : '');
+    const changed = key(session) !== key(this.session);
+    this.session = session;
+
+    if (changed) {
+      this.stopPrivateListeners();
+      if (session) this.startPrivateListeners();
+      this.profile = null;
+      if (session) this.loadProfile();
+    }
+    if (!isPrivileged(session)) this.closePanelModal(true);
+
+    this.updateAuthUI();
+    this.renderTray();
+    this.refreshOpenPanel();
   },
+
+  async startPrivateListeners() {
+    const s = this.session;
+    if (!s || !firebaseReady()) return;
+    await loadStore();
+    // Signed out or switched account while the SDK was loading
+    const sameUser = this.session && this.session.uid === s.uid && this.session.role === s.role;
+    if (!sameUser) return;
+    const u = this._privUnsubs = {};
+    const onErr = name => err => this.reportListenerError(name, err);
+
+    u.myOrders = store.watchMyOrders(s.uid, list => {
+      this.myOrders = list;
+      if (document.getElementById('historyModal')?.classList.contains('is-open')) this.renderCustomerHistory();
+    }, onErr('my orders'));
+
+    if (!isPrivileged(s)) return;
+    // Staff see their own and colleagues' changes live.
+    u.config = store.watchPublicConfig((data, source) => this.applyRemoteConfig(data, source), onErr('config'));
+    u.products = store.watchProducts((list, empty) => this.applyRemoteProducts(list, empty), onErr('products'));
+    if (canAccessTab(s, 'customers') || canAccessTab(s, 'economy')) {
+      u.orders = store.watchRecentOrders(list => {
+        this.staffOrders = list;
+        this.refreshOpenPanel(['customers']);
+        if (this.selectedStaffCustomerId) this.renderCustomerDrawerContent();
+      }, onErr('orders'));
+    }
+    if (canAccessTab(s, 'customers')) {
+      u.customers = store.watchCustomers(list => {
+        this.customers = list;
+        this.refreshOpenPanel(['customers']);
+      }, onErr('customers'));
+    }
+    if (canAccessTab(s, 'reviews')) {
+      u.reviews = store.watchAllReviews(list => {
+        this.allReviews = list;
+        this.approvedReviews = list.filter(r => r.status === 'approved');
+        this.renderReviews();
+        this.refreshOpenPanel(['reviews']);
+      }, onErr('reviews'));
+    }
+    if (s.role === 'admin' || s.role === 'dev') {
+      u.staff = store.watchStaffDirectory(list => {
+        this.staffDirectory = list;
+        this.refreshOpenPanel(['users']);
+      }, onErr('staff directory'));
+    }
+  },
+
+
+  // Stops privileged listeners and drops everything they loaded.
+  stopPrivateListeners() {
+    Object.values(this._privUnsubs || {}).forEach(fn => { try { fn(); } catch { /* already stopped */ } });
+    this._privUnsubs = {};
+    this.myOrders = [];
+    this.staffOrders = [];
+    this.customers = [];
+    this.allReviews = [];
+    this.staffDirectory = [];
+    this.selectedStaffCustomerId = null;
+    this.closeCustomerDrawer();
+  },
+
+  async loadProfile() {
+    const s = this.session;
+    if (!s) return;
+    try {
+      await loadStore();
+      const p = await store.getProfile(s.uid);
+      if (this.session && this.session.uid === s.uid) {
+        this.profile = p || null;
+        this.prefillCheckoutDetails();
+      }
+    } catch (e) {
+      // A missing or unreadable profile is not fatal; checkout asks for details instead.
+      console.warn('Profile not loaded:', describeDataError(e));
+    }
+  },
+
+
+  // State & LocalStorage Helpers
+  // Starting state: cached public data from the last visit, else the built-in defaults.
+  loadState() {
+    this.config = this.normalizeConfig(this.cacheGet(KEYS.CONFIG, null) || DEFAULT_CONFIG);
+
+    const cachedProducts = this.cacheGet(KEYS.PRODUCTS, null);
+    const products = Array.isArray(cachedProducts) ? cachedProducts : DEFAULT_PRODUCTS;
+    this.products = products.map(p => this.normalizeProduct(p)).filter(Boolean);
+    if (!this.selectedProductId && this.products.length > 0) {
+      this.selectedProductId = this.products[0].id;
+      this.pendingImageData = this.products[0].img || '';
+    }
+
+    this.cart = loadCart(localStorage, this.products);
+    const localOrders = this.cacheGet(KEYS.MY_ORDERS, []);
+    this.localOrders = Array.isArray(localOrders) ? localOrders.slice(0, 50) : [];
+
+    const pref = this.cacheGet(KEYS.PREF, null);
+    if (pref && typeof pref === 'object') {
+      if (pref.lang === 'en' || pref.lang === 'ku') this.lang = pref.lang;
+      if (typeof pref.currency === 'string') this.currency = pref.currency;
+      if (pref.themeMode === 'light' || pref.themeMode === 'dark') this.themeModePref = pref.themeMode;
+    }
+  },
+
+  // Fill in any missing sections so older or partial configs render safely.
+  normalizeConfig(raw) {
+    const base = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    const c = raw && typeof raw === 'object' ? JSON.parse(JSON.stringify(raw)) : {};
+    const out = { ...base, ...c };
+    const mergeMap = key => {
+      out[key] = { ...base[key], ...(c[key] && typeof c[key] === 'object' ? c[key] : {}) };
+    };
+    ['shopName', 'tagline', 'announcement', 'aboutUs', 'socials'].forEach(mergeMap);
+    out.contact = { ...base.contact, ...(c.contact || {}) };
+    out.contact.address = { ...base.contact.address, ...((c.contact && c.contact.address) || {}) };
+    out.contact.hours = { ...base.contact.hours, ...((c.contact && c.contact.hours) || {}) };
+    out.economy = { ...DEFAULT_ECONOMY, ...(c.economy || {}) };
+    if (typeof c.iqdRate === 'number' && c.iqdRate > 0 && (!c.economy || !c.economy.exchangeRate)) {
+      out.economy.exchangeRate = c.iqdRate;
+    }
+    out.theme = { ...base.theme, ...(c.theme || {}) };
+    if (!out.theme.tokens) out.theme.tokens = (THEMES[out.theme.presetId] || THEMES.berry).tokens;
+    if (!Array.isArray(out.faq)) out.faq = base.faq;
+    if (!Array.isArray(out.reviews)) out.reviews = base.reviews;
+    if (!out.shopName.en || out.shopName.en === 'Sweet Crumb') {
+      out.shopName = { ...base.shopName };
+    }
+    out.kurdishBodyFont = out.kurdishBodyFont || 'Vazirmatn';
+    out.kurdishDisplayFont = out.kurdishDisplayFont || 'Vazirmatn';
+    if (!out.logoMode) out.logoMode = out.logoImage ? 'image' : (out.logoImageUrl ? 'url' : 'emoji');
+    out.logoEmoji = out.logoEmoji || '🎂';
+    out.logoImage = typeof out.logoImage === 'string' ? out.logoImage : '';
+    out.logoUrl = typeof out.logoUrl === 'string' ? out.logoUrl : (out.logoImageUrl || '');
+    // Never carry credentials or user lists inside the public config.
+    delete out.users;
+    delete out.updatedAt;
+    delete out.updatedBy;
+    return out;
+  },
+
+  normalizeProduct(p) {
+    if (!p || typeof p !== 'object' || !p.id || !p.name) return null;
+    const fallback = DEFAULT_PRODUCTS.find(d => d.id === p.id);
+    return {
+      ...p,
+      name: { en: p.name.en || '', ku: p.name.ku || '' },
+      desc: { en: (p.desc && p.desc.en) || '', ku: (p.desc && p.desc.ku) || '' },
+      unit: { en: (p.unit && p.unit.en) || '', ku: (p.unit && p.unit.ku) || '' },
+      priceUSD: Math.max(0, Number(p.priceUSD) || 0),
+      img: typeof p.img === 'string' && p.img.trim() ? p.img : ((fallback && fallback.img) || ''),
+      exclusions: Array.isArray(p.exclusions) ? p.exclusions : null,
+    };
+  },
+
+
+  // Keys of the public config, grouped by control-panel section (mirrors firestore.rules).
+  configKeysFor(section) {
+    const map = {
+      brand: ['shopName', 'tagline', 'logoMode', 'logoEmoji', 'logoImage', 'logoUrl', 'logoImageUrl', 'announcement'],
+      theme: ['theme'],
+      about: ['aboutUs'],
+      faq: ['faq'],
+      reviews: ['reviews'],
+      contact: ['contact'],
+      socials: ['socials'],
+      economy: ['economy', 'iqdRate'],
+      fonts: ['englishBodyFont', 'englishDisplayFont', 'kurdishBodyFont', 'kurdishDisplayFont'],
+      watermark: ['showWatermark'],
+    };
+    return map[section] || [];
+  },
+
+  // Saves one section of the public config. Resolves true only after Firestore accepted it.
+  // Until the shop has a config/public document, the first save migrates the whole config.
+  async saveConfig(section, { quiet = false, config = this.config } = {}) {
+    let keys = this.configKeysFor(section);
+    if (this.configSource !== 'public' && (this.session?.role === 'admin' || this.session?.role === 'dev')) {
+      keys = Object.keys({ brand: 1, theme: 1, about: 1, faq: 1, reviews: 1, contact: 1, socials: 1, economy: 1, fonts: 1 })
+        .flatMap(s => this.configKeysFor(s));
+      if (this.session.role === 'dev') keys.push('showWatermark');
+    }
+    const partial = {};
+    keys.forEach(k => { if (config[k] !== undefined) partial[k] = config[k]; });
+    const ok = await this.runWrite(() => store.savePublicConfig(partial, this.session?.uid), { quiet });
+    if (ok) this.configSource = 'public';
+    return ok;
+  },
+  // Edit a copy of the config, save the section, and only then show the change on the page.
+  // If the save fails, the page and the form keep their current state so nothing typed is lost.
+  async commitConfig(section, mutate, { quiet = false } = {}) {
+    const draft = JSON.parse(JSON.stringify(this.config));
+    const problem = mutate(draft);
+    if (problem) {
+      this.showToast(problem, 'error');
+      return false;
+    }
+    const ok = await this.saveConfig(section, { quiet, config: draft });
+    if (ok) {
+      this.config = this.normalizeConfig(draft);
+      this.cacheSet(KEYS.CONFIG, this.config);
+      this.renderAll();
+    }
+    return ok;
+  },
+
+
+  // Wraps a Firestore write with honest status reporting. Returns true on success.
+  async runWrite(fn, { quiet = false, successMsg = null } = {}) {
+    if (!this.session) {
+      this.showToast(this.t('saveNeedsSignIn'), 'error');
+      return false;
+    }
+    if (!firebaseReady()) {
+      this.showToast(this.t('saveOffline'), 'error');
+      return false;
+    }
+    this.setPanelStatus('saving');
+    try {
+      await loadStore();
+      await fn();
+      this.setPanelStatus('saved');
+      if (!quiet) this.showToast(successMsg || this.t('toastSaved'), 'success');
+      return true;
+    } catch (e) {
+      const kind = describeDataError(e);
+      this.setPanelStatus('failed');
+      const key = { denied: 'saveDenied', offline: 'saveOffline', invalid: 'saveInvalid' }[kind] || 'saveFailed';
+      this.showToast(this.t(key), 'error');
+      console.warn('Write failed:', kind, e && e.code);
+      return false;
+    }
+  },
+
+  setPanelStatus(state) {
+    const el = document.getElementById('panelSaveStatus');
+    if (!el) return;
+    const labels = { saving: this.t('statusSaving'), saved: this.t('statusSaved'), failed: this.t('statusFailed') };
+    el.textContent = labels[state] || '';
+    el.dataset.state = state;
+  },
+
+  // Saves a single product document. Resolves true only after Firestore accepted it.
+  async saveProduct(product, opts = {}) {
+    return this.runWrite(() => store.saveProduct(product, this.session?.uid), opts);
+  },
+
+  persistCart() {
+    saveCart(localStorage, this.cart);
+  },
+
+  savePref() {
+    this.cacheSet(KEYS.PREF, { lang: this.lang, currency: this.currency, themeMode: this.themeModePref || null });
+  },
+
 
   t(key) {
     const dict = TRANSLATIONS[this.lang] || TRANSLATIONS.en;
@@ -1678,28 +2078,11 @@ const app = {
 
   // Price Calculation & Dual Currency Formatting
   formatPrice(usdAmount, overrideCurrency = null) {
-    const eco = this.getEconomy();
-    const cur = overrideCurrency || this.currency;
-    const hasSecondary = eco.showSecondary !== false && eco.secondaryCurrency && eco.secondaryCurrency !== 'None';
-
-    if (cur !== 'USD' && hasSecondary) {
-      const rate = Number(eco.exchangeRate) > 0 ? Number(eco.exchangeRate) : (this.config.iqdRate || 1310);
-      const raw = Number(usdAmount || 0) * rate;
-      const rule = parseInt(eco.roundingRule, 10) || 250;
-      let rounded = raw;
-      if (rule > 1) {
-        rounded = Math.round(raw / rule) * rule;
-      } else {
-        rounded = Math.round(raw * 100) / 100;
-      }
-      const symbol = eco.currencySymbol || (eco.secondaryCurrency === 'IQD' ? 'د.ع' : eco.secondaryCurrency);
-      if (rule > 1) {
-        return new Intl.NumberFormat('en-US').format(rounded) + ' ' + symbol;
-      }
-      return symbol + ' ' + rounded.toFixed(2);
-    }
-    return '$' + Number(usdAmount || 0).toFixed(2);
+    const text = formatMoney(usdAmount, this.getEconomy(), overrideCurrency || this.currency, this.config?.iqdRate || IQD_RATE);
+    // In Kurdish (RTL) keep "$38.00" / "49,750 د.ع" in reading order inside sentences.
+    return this.lang === 'ku' ? '\u2066' + text + '\u2069' : text;
   },
+
 
   // Language & Direction Switching
   setLanguage(newLang) {
@@ -1790,76 +2173,84 @@ const app = {
 
   renderFAQ() {
     const wrap = document.getElementById('faqWrap');
-    if (!wrap) return;
+    const section = document.getElementById('faq');
+    if (!wrap || !section) return;
     const isKu = this.lang === 'ku';
-    const faqs = (this.config && this.config.faq) ? this.config.faq : [];
-    
-    if (faqs.length === 0) {
-      document.getElementById('faq').style.display = 'none';
-      return;
-    } else {
-      document.getElementById('faq').style.display = 'block';
-    }
+    const faqs = (this.config && Array.isArray(this.config.faq)) ? this.config.faq : [];
+    section.style.display = faqs.length === 0 ? 'none' : 'block';
+    const pick = o => (isKu ? (o?.ku || o?.en) : o?.en) || '';
 
     wrap.innerHTML = faqs.map(item => `
       <details class="faq-item">
-        <summary class="faq-summary">${isKu ? (item.q.ku || item.q.en) : item.q.en}</summary>
-        <div class="faq-content">
-          ${isKu ? (item.a.ku || item.a.en) : item.a.en}
-        </div>
+        <summary class="faq-summary">${escapeHTML(pick(item.q))}</summary>
+        <div class="faq-content">${escapeMultiline(pick(item.a))}</div>
       </details>
     `).join('');
   },
 
+
+  // Curated reviews from the config plus moderated (approved) customer reviews.
   renderReviews() {
     const grid = document.getElementById('reviewsGrid');
-    if (!grid) return;
+    const section = document.getElementById('reviews');
+    if (!grid || !section) return;
     const isKu = this.lang === 'ku';
-    const reviews = (this.config && this.config.reviews) ? this.config.reviews : [];
-    
-    if (reviews.length === 0) {
-      document.getElementById('reviews').style.display = 'none';
-      return;
-    } else {
-      document.getElementById('reviews').style.display = 'block';
-    }
+    const pick = o => (isKu ? (o?.ku || o?.en) : o?.en) || '';
 
-    grid.innerHTML = reviews.map(item => `
-      <div class="review-card">
-        <div class="stars">★★★★★</div>
-        <p class="review__quote">${isKu ? (item.quote.ku || item.quote.en) : item.quote.en}</p>
-        <div class="review__author">
-          <div class="review__avatar">${item.initials}</div>
+    const curated = ((this.config && this.config.reviews) || []).map(r => ({
+      initials: r.initials, name: pick(r.name), role: pick(r.role), quote: pick(r.quote), rating: 5,
+    }));
+    const approved = (this.approvedReviews || []).map(r => ({
+      initials: this.initialsFor(r.name), name: r.name, role: this.t('reviewVerifiedRole'), quote: r.text,
+      rating: Number.isInteger(r.rating) ? r.rating : 5,
+    }));
+    const all = [...approved, ...curated];
+
+    // The section stays visible so customers can always leave a review.
+    grid.innerHTML = all.length === 0
+      ? `<p class="reviews-empty">${escapeHTML(this.t('reviewsEmpty'))}</p>`
+      : all.map(item => `
+      <figure class="review-card">
+        <div class="stars" role="img" aria-label="${escapeHTML(this.t('reviewStarsLabel').replace('{n}', item.rating))}">${'★'.repeat(item.rating)}${'☆'.repeat(5 - item.rating)}</div>
+        <blockquote class="review__quote">${escapeHTML(item.quote)}</blockquote>
+        <figcaption class="review__author">
+          <div class="review__avatar" aria-hidden="true">${escapeHTML(String(item.initials || '').slice(0, 2))}</div>
           <div>
-            <strong style="display:block;font-size:0.92rem;">${isKu ? (item.name.ku || item.name.en) : item.name.en}</strong>
-            <span class="text-small" style="color:var(--muted);">${isKu ? (item.role.ku || item.role.en) : item.role.en}</span>
+            <strong class="review__name">${escapeHTML(item.name)}</strong>
+            <span class="text-small review__role">${escapeHTML(item.role)}</span>
           </div>
-        </div>
-      </div>
+        </figcaption>
+      </figure>
     `).join('');
+    section.style.display = 'block';
   },
+
+  initialsFor(name) {
+    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (parts.length > 1) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return (parts[0] || '?').slice(0, 2).toUpperCase();
+  },
+
 
   // Update all static data-i18n attributes
+  // Update all static data-i18n attributes (translations are code constants; only they may contain markup)
   renderI18nStatic() {
-    const elements = document.querySelectorAll('[data-i18n]');
-    elements.forEach(el => {
-      const key = el.getAttribute('data-i18n');
-      const val = this.t(key);
-      if (val) {
-        if (val.includes('<') && val.includes('>')) {
-          el.innerHTML = val;
-        } else {
-          el.textContent = val;
-        }
-      }
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+      const val = this.t(el.getAttribute('data-i18n'));
+      if (!val) return;
+      if (val.includes('<') && val.includes('>')) el.innerHTML = sanitizeInlineHTML(val);
+      else el.textContent = val;
     });
-
     document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
-      const key = el.getAttribute('data-i18n-placeholder');
-      const val = this.t(key);
+      const val = this.t(el.getAttribute('data-i18n-placeholder'));
       if (val) el.setAttribute('placeholder', val);
     });
+    document.querySelectorAll('[data-i18n-aria]').forEach(el => {
+      const val = this.t(el.getAttribute('data-i18n-aria'));
+      if (val) el.setAttribute('aria-label', val);
+    });
   },
+
 
   updatePriceFilterLabels() {
     const priceSel = document.getElementById('menuPriceSelect');
@@ -1871,7 +2262,7 @@ const app = {
       const isKu = this.lang === 'ku';
       const formatBound = (val) => {
         let res = this.formatPrice(val);
-        return res.replace(/\.00$/, '');
+        return res.replace(/\.00(?=\u2069?$)/, '');
       };
       if (optUnder20) optUnder20.textContent = isKu ? `کەمتر لە ${formatBound(20)}` : `Under ${formatBound(20)}`;
       if (opt20to40) opt20to40.textContent = `${formatBound(20)} – ${formatBound(40)}`;
@@ -1882,33 +2273,16 @@ const app = {
 
   // Kurdish text normalization (harakat stripping & character normalization)
   normalizeKurdish(str) {
-    if (!str) return '';
-    return String(str)
-      .toLowerCase()
-      .replace(/[\u064B-\u065F\u0670]/g, '')
-      .replace(/[يى]/g, 'ی')
-      .replace(/ك/g, 'ک')
-      .replace(/ه/g, 'ە')
-      .trim();
+    return normalizeKurdish(str);
   },
 
+
   // Highlight search query tokens inside text
+  // Returns escaped HTML with the query highlighted.
   highlightMatch(text, rawQuery) {
-    if (!rawQuery || !text) return text;
-    const tokens = rawQuery.trim().split(/\s+/).filter(Boolean);
-    if (tokens.length === 0) return text;
-    let result = String(text);
-    tokens.forEach(tok => {
-      try {
-        const escaped = tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(`(${escaped})`, 'gi');
-        result = result.replace(regex, '<mark class="search-highlight">$1</mark>');
-      } catch {
-        // regex character escape protection
-      }
-    });
-    return result;
+    return highlightMatches(text, rawQuery);
   },
+
 
   // Search input handler with 150ms debounce
   handleSearchInput(val) {
@@ -1982,7 +2356,10 @@ const app = {
     this.category = cat;
     ['all', 'cakes', 'cupcakes', 'desserts'].forEach(c => {
       const btn = document.getElementById(`filter-${c}`);
-      if (btn) btn.classList.toggle('is-active', c === cat);
+      if (btn) {
+        btn.classList.toggle('is-active', c === cat);
+        btn.setAttribute('aria-pressed', c === cat ? 'true' : 'false');
+      }
     });
     const mobSel = document.getElementById('mobileCategorySelect');
     if (mobSel) mobSel.value = cat;
@@ -1990,118 +2367,65 @@ const app = {
     this.renderMenu(false);
   },
 
-  parseUrlHash() {
-    const hash = window.location.hash || '';
-    if (hash.startsWith('#menu?') || hash.startsWith('#menu')) {
-      const qIndex = hash.indexOf('?');
-      if (qIndex !== -1) {
-        const params = new URLSearchParams(hash.substring(qIndex + 1));
-        if (params.has('q')) this.searchQuery = params.get('q') || '';
-        if (params.has('cat')) this.category = params.get('cat') || 'all';
-        if (params.has('sort')) this.sortOption = params.get('sort') || 'popular';
-        if (params.has('range')) this.priceRange = params.get('range') || 'any';
 
-        // Sync inputs
-        const input = document.getElementById('menuSearchInput');
-        if (input) {
-          input.value = this.searchQuery;
-          const clearBtn = document.getElementById('menuSearchClear');
-          if (clearBtn) clearBtn.style.display = this.searchQuery ? 'block' : 'none';
-        }
-        const sortSel = document.getElementById('menuSortSelect');
-        if (sortSel) sortSel.value = this.sortOption;
-        const priceSel = document.getElementById('menuPriceSelect');
-        if (priceSel) priceSel.value = this.priceRange;
-        const catSel = document.getElementById('mobileCategorySelect');
-        if (catSel) catSel.value = this.category;
-        ['all', 'cakes', 'cupcakes', 'desserts'].forEach(c => {
-          const btn = document.getElementById(`filter-${c}`);
-          if (btn) btn.classList.toggle('is-active', c === this.category);
-        });
+  parseUrlHash() {
+    const state = parseMenuHash(window.location.hash);
+    this.searchQuery = state.q;
+    this.category = state.cat;
+    this.sortOption = state.sort;
+    this.priceRange = state.range;
+
+    const input = document.getElementById('menuSearchInput');
+    if (input) input.value = this.searchQuery;
+    const clearBtn = document.getElementById('menuSearchClear');
+    if (clearBtn) clearBtn.style.display = this.searchQuery ? 'block' : 'none';
+    const sortSel = document.getElementById('menuSortSelect');
+    if (sortSel) sortSel.value = this.sortOption;
+    const priceSel = document.getElementById('menuPriceSelect');
+    if (priceSel) priceSel.value = this.priceRange;
+    const catSel = document.getElementById('mobileCategorySelect');
+    if (catSel) catSel.value = this.category;
+    ['all', 'cakes', 'cupcakes', 'desserts'].forEach(c => {
+      const btn = document.getElementById(`filter-${c}`);
+      if (btn) {
+        btn.classList.toggle('is-active', c === this.category);
+        btn.setAttribute('aria-pressed', c === this.category ? 'true' : 'false');
       }
-    }
+    });
   },
+
 
   updateUrlHash() {
-    const params = new URLSearchParams();
-    if (this.searchQuery && this.searchQuery.trim()) params.set('q', this.searchQuery.trim());
-    if (this.category && this.category !== 'all') params.set('cat', this.category);
-    if (this.sortOption && this.sortOption !== 'popular') params.set('sort', this.sortOption);
-    if (this.priceRange && this.priceRange !== 'any') params.set('range', this.priceRange);
-
-    const paramStr = params.toString();
-    const newHash = paramStr ? `#menu?${paramStr}` : '#menu';
-    if (window.location.hash !== newHash) {
-      history.replaceState(null, '', newHash);
-    }
+    const newHash = buildMenuHash({ q: this.searchQuery, cat: this.category, sort: this.sortOption, range: this.priceRange });
+    if (window.location.hash !== newHash) history.replaceState(null, '', newHash);
   },
 
+
   // Category Filtering
+  // Menu Grid Rendering with Search, Sort, Price Filter & Empty State
   // Menu Grid Rendering with Search, Sort, Price Filter & Empty State
   renderMenu(animate = false) {
     const grid = document.getElementById('menuGrid');
     if (!grid) return;
 
     const isKu = this.lang === 'ku';
-
-    // 1. Filter by category
-    let filtered = this.products.filter(p => this.category === 'all' || p.category === this.category);
-
-    // 2. Filter by price range
-    if (this.priceRange === 'under-20') {
-      filtered = filtered.filter(p => p.priceUSD < 20);
-    } else if (this.priceRange === '20-40') {
-      filtered = filtered.filter(p => p.priceUSD >= 20 && p.priceUSD <= 40);
-    } else if (this.priceRange === '40-60') {
-      filtered = filtered.filter(p => p.priceUSD >= 40 && p.priceUSD <= 60);
-    } else if (this.priceRange === 'over-60') {
-      filtered = filtered.filter(p => p.priceUSD > 60);
-    }
-
-    // 3. Filter by search query (tokens with Kurdish normalization)
+    const pick = o => (isKu ? (o?.ku || o?.en) : o?.en) || '';
     const rawQ = (this.searchQuery || '').trim();
-    if (rawQ) {
-      const tokens = rawQ.split(/\s+/).map(t => this.normalizeKurdish(t)).filter(Boolean);
-      filtered = filtered.filter(p => {
-        const haystack = [
-          p.name?.en,
-          p.desc?.en,
-          p.name?.ku,
-          p.desc?.ku,
-          p.category,
-          p.tag
-        ].map(s => this.normalizeKurdish(s)).join(' ');
+    const tokens = searchTokens(rawQ);
 
-        return tokens.every(tok => haystack.includes(tok));
-      });
-    }
+    let filtered = this.products.filter(p =>
+      (this.category === 'all' || p.category === this.category) &&
+      inPriceRange(p.priceUSD, this.priceRange) &&
+      matchesSearch(p, tokens)
+    );
 
-    // 4. Sort
-    if (this.sortOption === 'popular') {
-      filtered.sort((a, b) => {
-        const aPop = a.tag === 'bestseller' ? 1 : 0;
-        const bPop = b.tag === 'bestseller' ? 1 : 0;
-        return bPop - aPop;
-      });
-    } else if (this.sortOption === 'newest') {
-      filtered.sort((a, b) => {
-        const aNew = a.tag === 'new' ? 1 : 0;
-        const bNew = b.tag === 'new' ? 1 : 0;
-        return bNew - aNew;
-      });
-    } else if (this.sortOption === 'price-asc') {
-      filtered.sort((a, b) => a.priceUSD - b.priceUSD);
-    } else if (this.sortOption === 'price-desc') {
-      filtered.sort((a, b) => b.priceUSD - a.priceUSD);
-    } else if (this.sortOption === 'name-asc') {
-      filtered.sort((a, b) => {
-        const nameA = isKu ? (a.name.ku || a.name.en) : a.name.en;
-        const nameB = isKu ? (b.name.ku || b.name.en) : b.name.en;
-        return nameA.localeCompare(nameB);
-      });
-    }
+    const flagged = tag => (a, b) => (b.tag === tag ? 1 : 0) - (a.tag === tag ? 1 : 0);
+    if (this.sortOption === 'popular') filtered.sort(flagged('bestseller'));
+    else if (this.sortOption === 'newest') filtered.sort(flagged('new'));
+    else if (this.sortOption === 'price-asc') filtered.sort((a, b) => a.priceUSD - b.priceUSD);
+    else if (this.sortOption === 'price-desc') filtered.sort((a, b) => b.priceUSD - a.priceUSD);
+    else if (this.sortOption === 'name-asc') filtered.sort((a, b) => pick(a.name).localeCompare(pick(b.name)));
 
-    // 5. Update results count
     const countEl = document.getElementById('menuResultsCount');
     if (countEl) {
       countEl.textContent = this.t('searchResultsCount')
@@ -2109,54 +2433,51 @@ const app = {
         .replace('{total}', this.products.length);
     }
 
-    // 6. Handle Empty State
     if (filtered.length === 0) {
-      const emptyTitle = rawQ
-        ? this.t('searchNoResults').replace('{query}', rawQ)
-        : this.t('searchNoResults').replace('"{query}"', '');
+      const emptyTitle = this.products.length === 0
+        ? this.t('menuNoProducts')
+        : (rawQ ? this.t('searchNoResults').replace('{query}', rawQ) : this.t('searchNoResults').replace('"{query}"', '').replace('{query}', ''));
       grid.innerHTML = `
         <div class="menu-empty-state">
-          <div class="menu-empty-icon">🍰</div>
-          <h3 class="menu-empty-title">${emptyTitle}</h3>
-          <p class="menu-empty-desc">${this.t('searchEmptyDesc')}</p>
-          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
-            ${rawQ ? `<button type="button" class="btn btn--secondary btn--sm" onclick="app.clearSearch()">${this.t('searchClearSearch')}</button>` : ''}
-            <button type="button" class="btn btn--primary btn--sm" onclick="app.clearAllFilters()">${this.t('searchClearAll')}</button>
-          </div>
+          <div class="menu-empty-icon" aria-hidden="true">🍰</div>
+          <h3 class="menu-empty-title">${escapeHTML(emptyTitle)}</h3>
+          ${this.products.length ? `<p class="menu-empty-desc">${escapeHTML(this.t('searchEmptyDesc'))}</p>
+          <div class="menu-empty-actions">
+            ${rawQ ? `<button type="button" class="btn btn--secondary btn--sm" onclick="app.clearSearch()">${escapeHTML(this.t('searchClearSearch'))}</button>` : ''}
+            <button type="button" class="btn btn--primary btn--sm" onclick="app.clearAllFilters()">${escapeHTML(this.t('searchClearAll'))}</button>
+          </div>` : ''}
         </div>
       `;
       return;
     }
 
-    // 7. Render cake cards
     grid.innerHTML = filtered.map((item, index) => {
-      const rawName = isKu ? (item.name.ku || item.name.en) : item.name.en;
-      const rawDesc = isKu ? (item.desc.ku || item.desc.en) : item.desc.en;
-      const name = rawQ ? this.highlightMatch(rawName, rawQ) : rawName;
-      const desc = rawQ ? this.highlightMatch(rawDesc, rawQ) : rawDesc;
-      const unit = isKu ? (item.unit.ku || item.unit.en) : item.unit.en;
-      const priceFormatted = this.formatPrice(item.priceUSD);
+      const rawName = pick(item.name);
+      const name = rawQ ? highlightMatches(rawName, rawQ) : escapeHTML(rawName);
+      const desc = rawQ ? highlightMatches(pick(item.desc), rawQ) : escapeHTML(pick(item.desc));
+      const unit = escapeHTML(pick(item.unit));
+      const priceFormatted = escapeHTML(this.formatPrice(item.priceUSD));
+      const emoji = escapeHTML(item.emoji || '🎂');
 
       let tagBadge = '';
-      if (item.tag === 'bestseller') {
-        tagBadge = `<span class="cake__tag cake__tag--bestseller">${this.t('tagBestseller')}</span>`;
-      } else if (item.tag === 'new') {
-        tagBadge = `<span class="cake__tag cake__tag--new">${this.t('tagNew')}</span>`;
-      }
+      if (item.tag === 'bestseller') tagBadge = `<span class="cake__tag cake__tag--bestseller">${escapeHTML(this.t('tagBestseller'))}</span>`;
+      else if (item.tag === 'new') tagBadge = `<span class="cake__tag cake__tag--new">${escapeHTML(this.t('tagNew'))}</span>`;
 
-      const hasImg = Boolean(item.img && item.img.trim());
-      const mediaHtml = hasImg
-        ? `<img src="${item.img}" alt="${rawName}" loading="lazy" referrerpolicy="no-referrer" class="cake-card__img" onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='flex';" /><div class="cake-card__emoji" style="display:none;" aria-label="${rawName}">${item.emoji || '🎂'}</div>`
-        : `<div class="cake-card__emoji" aria-label="${rawName}">${item.emoji || '🎂'}</div>`;
+      const imgSrc = safeUrl(item.img, { allowDataImage: true });
+      const mediaHtml = imgSrc
+        ? `<img src="${escapeHTML(imgSrc)}" ${srcsetFor(imgSrc) ? `srcset="${escapeHTML(srcsetFor(imgSrc))}" sizes="(max-width: 560px) 50vw, (max-width: 1100px) 33vw, 300px"` : ''} alt="${escapeHTML(rawName)}" loading="lazy" decoding="async" width="800" height="600" referrerpolicy="no-referrer" class="cake-card__img" onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='flex';" /><div class="cake-card__emoji" style="display:none;" aria-hidden="true">${emoji}</div>`
+        : `<div class="cake-card__emoji" aria-hidden="true">${emoji}</div>`;
 
       const animClass = animate ? 'cake-card-animate' : '';
       const animStyle = animate ? `style="--stagger:${index % 12};"` : '';
+      const domId = 'product-' + String(item.id).replace(/[^A-Za-z0-9_-]/g, '_');
 
       return `
-        <article class="cake-card ${animClass}" id="product-${item.id}" ${animStyle}>
+        <article class="cake-card ${animClass}" id="${escapeHTML(domId)}" ${animStyle}>
           <div class="cake-card__media">
             ${mediaHtml}
             ${tagBadge}
+            <span class="cake-card__count" data-count-for="${escapeHTML(item.id)}" hidden></span>
           </div>
           <div class="cake-card__body">
             <h3 class="cake-card__title">${name}</h3>
@@ -2166,15 +2487,34 @@ const app = {
                 <span class="price">${priceFormatted}</span>
                 <span class="price-unit">${unit}</span>
               </div>
-              <button class="btn btn--primary btn--sm" onclick="app.openCustomizeModal('${item.id}')" aria-label="${this.t('btnAdd')} ${rawName}">
-                ${this.t('btnAdd')}
+              <button type="button" class="btn btn--primary btn--sm" onclick="app.openCustomizeModal(${jsArg(item.id)})" aria-label="${escapeHTML(this.t('btnAdd') + ': ' + rawName)}">
+                ${escapeHTML(this.t('btnAdd'))}
               </button>
             </div>
           </div>
         </article>
       `;
     }).join('');
+    this.syncMenuOrderState();
   },
+
+
+  // Mark menu cards that are already in the order, so shoppers can see what they picked
+  // Mark menu cards that are already in the cart, so shoppers can see what they picked
+  syncMenuOrderState() {
+    const counts = new Map();
+    for (const item of this.cart || []) {
+      if (item.qty > 0) counts.set(item.productId, (counts.get(item.productId) || 0) + item.qty);
+    }
+    document.querySelectorAll('.cake-card__count[data-count-for]').forEach(el => {
+      const n = counts.get(el.dataset.countFor) || 0;
+      const card = el.closest('.cake-card');
+      if (card) card.classList.toggle('is-in-order', n > 0);
+      el.hidden = n === 0;
+      el.textContent = n > 0 ? this.t('inOrderCount').replace('{n}', n) : '';
+    });
+  },
+
 
   getShopName() {
     if (!this.config || !this.config.shopName) return 'Yummy Sweets';
@@ -2185,14 +2525,11 @@ const app = {
     const c = this.config;
     if (!c) return null;
     const mode = c.logoMode || (c.logoImage ? 'image' : (c.logoImageUrl ? 'url' : 'emoji'));
-    if (mode === 'image' && c.logoImage && c.logoImage.trim() !== '') {
-      return c.logoImage;
-    }
-    if (mode === 'url' && (c.logoUrl || c.logoImageUrl) && (c.logoUrl || c.logoImageUrl).trim() !== '') {
-      return c.logoUrl || c.logoImageUrl;
-    }
+    if (mode === 'image' && c.logoImage) return safeUrl(c.logoImage, { allowDataImage: true }) || null;
+    if (mode === 'url') return safeUrl(c.logoUrl || c.logoImageUrl) || null;
     return null;
   },
+
 
   updateFavicon() {
     const src = this.resolveLogoSrc();
@@ -2205,25 +2542,29 @@ const app = {
     if (src) {
       link.href = src;
     } else {
-      const emoji = (this.config && this.config.logoEmoji) || '🎂';
-      // High-resolution SVG favicon on berry background (#8E3B4A)
+      const emoji = escapeHTML(Array.from((this.config && this.config.logoEmoji) || '🎂').slice(0, 4).join(''));
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="#8E3B4A"/><text x="32" y="46" font-size="38" text-anchor="middle">${emoji}</text></svg>`;
       link.href = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
     }
   },
+
 
   renderLogoElements() {
     const src = this.resolveLogoSrc();
     const emoji = (this.config && this.config.logoEmoji) || '🎂';
     const shopName = this.getShopName();
 
-    const logoElements = document.querySelectorAll('[data-logo]');
-    logoElements.forEach(el => {
-      // 200ms smooth fade between old and new state
+    document.querySelectorAll('[data-logo]').forEach(el => {
       el.style.opacity = '0';
       setTimeout(() => {
+        el.textContent = '';
         if (src) {
-          el.innerHTML = `<img src="${src}" alt="${shopName}" class="logo__img" onerror="this.onerror=null;this.parentElement.textContent='${emoji}';" />`;
+          const img = document.createElement('img');
+          img.src = src;
+          img.alt = shopName;
+          img.className = 'logo__img';
+          img.onerror = () => { el.textContent = emoji; };
+          el.appendChild(img);
         } else {
           el.textContent = emoji;
         }
@@ -2232,85 +2573,96 @@ const app = {
     });
   },
 
+
+  // Render Config-driven Brand, Contact & Footer
+  // Announcement text with the live free-delivery threshold filled in.
+  announcementHtml() {
+    const c = this.config;
+    const raw = (this.lang === 'ku' ? (c.announcement.ku || c.announcement.en) : c.announcement.en) || '';
+    const eco = this.getEconomy();
+    const threshold = Math.max(0, Number(eco.freeDeliveryOver) || 0);
+    const amount = this.formatPrice(threshold).replace(/\.00(?=\u2069?$)/, '');
+    let html = sanitizeInlineHTML(raw.replace(/\{freeDelivery\}/g, amount));
+    // Old copy hardcoded "$50"; keep it truthful by showing the configured amount.
+    html = html.replace(/\$50(?![0-9])/g, escapeHTML(amount));
+    return html;
+  },
+
+  // JSON-LD for search engines, from the live config (only fields that are actually set).
+  updateStructuredData(shopName) {
+    const el = document.getElementById('ldJson');
+    if (!el) return;
+    const description = document.querySelector('meta[name="description"]')?.content || '';
+    const url = document.querySelector('link[rel="canonical"]')?.href || '';
+    el.textContent = JSON.stringify(buildStructuredData(this.config, { name: shopName, description, url }));
+  },
+
   // Render Config-driven Brand, Contact & Footer
   renderBranding() {
     const c = this.config;
     const isKu = this.lang === 'ku';
+    const pick = o => (isKu ? (o?.ku || o?.en) : o?.en) || '';
+    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
 
     const shopName = this.getShopName();
-    const tagline = isKu ? (c.tagline.ku || c.tagline.en) : c.tagline.en;
-    const announcement = isKu ? (c.announcement.ku || c.announcement.en) : c.announcement.en;
-    const story = isKu ? (c.aboutUs.ku || c.aboutUs.en) : c.aboutUs.en;
-    const address = isKu ? (c.contact.address.ku || c.contact.address.en) : c.contact.address.en;
-    const hours = isKu ? (c.contact.hours.ku || c.contact.hours.en) : c.contact.hours.en;
-
-    // Document Title
+    const tagline = pick(c.tagline);
     document.title = `${shopName} — ${tagline}`;
+    this.updateStructuredData(shopName);
 
-    // Header & Footer Logo
-    const headerShopName = document.getElementById('headerShopName');
-    if (headerShopName) headerShopName.textContent = shopName;
+    ['headerShopName', 'footerShopName', 'mobileShopName', 'copyrightName'].forEach(id => setText(id, shopName));
+    setText('copyrightYear', new Date().getFullYear());
+    setText('headerShopTagline', tagline);
 
-    const footerShopName = document.getElementById('footerShopName');
-    if (footerShopName) footerShopName.textContent = shopName;
-
-    const mobileShopName = document.getElementById('mobileShopName');
-    if (mobileShopName) mobileShopName.textContent = shopName;
-
-    const copyrightName = document.getElementById('copyrightName');
-    if (copyrightName) copyrightName.textContent = shopName;
-
-    const copyrightYear = document.getElementById('copyrightYear');
-    if (copyrightYear) copyrightYear.textContent = new Date().getFullYear();
-
-    const headerTagline = document.getElementById('headerShopTagline');
-    if (headerTagline) headerTagline.textContent = tagline;
-
-    // Reactively update logo tiles and browser favicon
     this.renderLogoElements();
     this.updateFavicon();
 
-    // Announcement Bar
     const announcementEl = document.getElementById('announcementText');
-    if (announcementEl) announcementEl.innerHTML = announcement;
+    if (announcementEl) announcementEl.innerHTML = this.announcementHtml();
+    const bar = document.getElementById('announcementBar');
+    if (bar) bar.hidden = !stripTags(pick(c.announcement)).trim();
 
-    // Story section
-    const storyTextEl = document.getElementById('storyText');
-    if (storyTextEl) storyTextEl.textContent = story;
-
+    setText('storyText', pick(c.aboutUs));
     const storyEyebrow = isKu ? (c.aboutUs.eyebrowKu || c.aboutUs.eyebrowEn || 'کەلەپووری ئێمە') : (c.aboutUs.eyebrowEn || 'Our Heritage');
     const storyTitle = isKu ? (c.aboutUs.titleKu || c.aboutUs.titleEn || 'بە ئارامگرتن ئامادە کراوە، بە خۆشەویستی برژاوە') : (c.aboutUs.titleEn || 'Crafted with patience, baked with devotion');
-    const storyImageUrl = c.aboutUs.imageUrl || 'https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=900&auto=format&fit=crop&q=80';
-
     const eyebrowEl = document.querySelector('[data-i18n="storyEyebrow"]');
     if (eyebrowEl) eyebrowEl.textContent = storyEyebrow;
-    
     const titleEl = document.querySelector('[data-i18n="storyTitle"]');
     if (titleEl) titleEl.textContent = storyTitle;
-    
     const imgEl = document.querySelector('.story__img');
-    if (imgEl) imgEl.src = storyImageUrl;
-
-    // Contact Cards
-    const infoAddress = document.getElementById('infoAddress');
-    if (infoAddress) infoAddress.textContent = address;
-
-    const infoHours = document.getElementById('infoHours');
-    if (infoHours) infoHours.innerHTML = hours.replace(/\n/g, '<br/>');
-
-    const infoContact = document.getElementById('infoContact');
-    if (infoContact) {
-      infoContact.innerHTML = `WhatsApp: +${c.contact.whatsapp}<br/>${c.contact.email}<br/>${c.contact.phone}`;
+    const storyImg = safeUrl(c.aboutUs.imageUrl);
+    if (imgEl && storyImg && imgEl.getAttribute('src') !== storyImg) {
+      imgEl.src = storyImg;
+      const set = srcsetFor(storyImg, [480, 720, 900]);
+      if (set) imgEl.srcset = set; else imgEl.removeAttribute('srcset');
     }
 
-    // Footer info
-    const footerHours = document.getElementById('footerHours');
-    if (footerHours) footerHours.innerHTML = hours.replace(/\n/g, '<br/>');
+    // Contact details: empty values are hidden rather than shown as placeholders.
+    setText('infoAddress', pick(c.contact.address));
+    const hours = pick(c.contact.hours);
+    ['infoHours', 'footerHours'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = escapeMultiline(hours);
+    });
 
+    const wa = normalizeWhatsAppNumber(c.contact.whatsapp);
+    const phone = String(c.contact.phone || '').trim();
+    const email = String(c.contact.email || '').trim();
+    const infoContact = document.getElementById('infoContact');
+    if (infoContact) {
+      const rows = [];
+      if (wa) rows.push(`<a href="https://wa.me/${wa}" target="_blank" rel="noopener noreferrer" dir="ltr">WhatsApp: +${wa}</a>`);
+      if (email) rows.push(`<a href="mailto:${escapeHTML(email)}" dir="ltr">${escapeHTML(email)}</a>`);
+      if (phone) rows.push(`<a href="tel:${escapeHTML(phone.replace(/[^\d+]/g, ''))}" dir="ltr">${escapeHTML(phone)}</a>`);
+      infoContact.innerHTML = rows.length ? rows.join('<br>') : escapeHTML(this.t('contactNotSet'));
+    }
     const footerPhone = document.getElementById('footerPhone');
-    if (footerPhone) footerPhone.textContent = c.contact.phone;
+    const footerPhoneRow = document.getElementById('footerPhoneRow');
+    if (footerPhone) {
+      footerPhone.textContent = phone || (wa ? '+' + wa : '');
+      footerPhone.href = phone ? 'tel:' + phone.replace(/[^\d+]/g, '') : (wa ? 'https://wa.me/' + wa : '#');
+    }
+    if (footerPhoneRow) footerPhoneRow.hidden = !(phone || wa);
 
-    // Social Links (empty URL = hide the icon instead of linking to a placeholder)
     const socials = c.socials || {};
     [
       ['socialInsta', socials.instagram],
@@ -2320,235 +2672,181 @@ const app = {
     ].forEach(([id, rawUrl]) => {
       const el = document.getElementById(id);
       if (!el) return;
-      const url = (rawUrl || '').trim();
-      const hasUrl = url !== '' && url !== '#';
+      const url = safeUrl(rawUrl);
+      const hasUrl = /^https?:\/\//i.test(url);
       el.href = hasUrl ? url : '#';
       el.style.display = hasUrl ? '' : 'none';
     });
   },
 
+
+  // Order Tray & WhatsApp Cart
   // Order Tray & WhatsApp Cart
   addToOrder(productId, exclude = []) {
-    const existing = this.order.find(item => item.productId === productId && item.exclude.join('|') === exclude.join('|'));
-    if (existing) {
-      existing.qty++;
-    } else {
-      this.order.push({
-        id: this.generateId(),
-        productId,
-        qty: 1,
-        exclude: [...exclude]
-      });
-    }
+    if (!this.products.some(p => p.id === productId)) return;
+    this.cart = addItem(this.cart, productId, exclude);
+    this.persistCart();
+    this.clearSentNotice();
     this.renderTray();
+    this.syncMenuOrderState();
     this.showToast(this.t('toastAdded'), 'success');
   },
+
+  changeCartQty(lineId, delta) {
+    this.cart = changeQty(this.cart, lineId, delta);
+    this.persistCart();
+    this.clearSentNotice();
+    this.renderTray();
+    this.syncMenuOrderState();
+    this.focusCartLine(lineId);
+  },
+
+  removeCartLine(lineId) {
+    const line = priceLines(this.cart.filter(i => i.id === lineId), this.products, this.lang)[0];
+    this.cart = removeItem(this.cart, lineId);
+    this.persistCart();
+    this.clearSentNotice();
+    this.renderTray();
+    this.syncMenuOrderState();
+    if (line) this.announce(this.t('cartItemRemoved').replace('{name}', line.name));
+    const tray = document.getElementById('trayLines');
+    const next = tray && tray.querySelector('button');
+    if (next) next.focus();
+  },
+
+  // Keep keyboard focus on the same line after the tray re-renders.
+  focusCartLine(lineId) {
+    const row = document.querySelector(`#trayLines [data-line="${CSS.escape(lineId)}"]`);
+    if (row) {
+      const btn = row.querySelector('[data-qty-action]');
+      if (btn) btn.focus();
+    } else {
+      const first = document.querySelector('#trayLines button');
+      if (first) first.focus();
+    }
+  },
+
   
   openCustomizeModal(productId) {
     const prod = this.products.find(p => p.id === productId);
     if (!prod) return;
-    
     if (!prod.exclusions || prod.exclusions.length === 0) {
       this.addToOrder(productId);
       return;
     }
-    
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay is-open';
-    overlay.style.zIndex = '1000';
-    
+
     const isKu = this.lang === 'ku';
-    const title = isKu ? (prod.name.ku || prod.name.en) : prod.name.en;
-    
-    let html = `
-      <div class="modal-window" style="max-width:400px; padding: 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
-          <h2 style="font-family:var(--font-serif); font-size: 1.2rem; color:var(--cocoa); margin:0;">${this.t('customizeTitle') || 'Customize'}</h2>
-          <button class="modal-close" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--muted);" onclick="this.closest('.modal-overlay').remove()">×</button>
+    const pick = o => (isKu ? (o?.ku || o?.en) : o?.en) || '';
+    const trigger = document.activeElement;
+    document.getElementById('customizeModal')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'customizeModal';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', 'customizeTitle');
+    overlay.innerHTML = `
+      <div class="modal-window modal-window--narrow">
+        <div class="modal-header">
+          <h3 class="modal-title" id="customizeTitle">${escapeHTML(this.t('customizeTitle') || 'Customize')}</h3>
+          <button type="button" class="modal-close" data-close aria-label="${escapeHTML(this.t('btnClose'))}">✕</button>
         </div>
-        <h4 style="font-family:var(--font-serif);margin-top:0;margin-bottom:12px;color:var(--ink);">${title}</h4>
-        <p style="font-weight:600;margin-bottom:12px;color:var(--cocoa-soft);">${this.t('customizeLeaveOut') || 'Leave out'}:</p>
-        <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:24px;">
-    `;
-    
-    prod.exclusions.forEach(ex => {
-      const label = isKu ? (ex.ku || ex.en) : ex.en;
-      html += `
-        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;color:var(--ink);">
-          <input type="checkbox" class="customize-exclude-cb" value="${ex.id}" style="width:18px;height:18px;" />
-          <span>${label}</span>
-        </label>
-      `;
-    });
-    
-    html += `
+        <div class="modal-body">
+          <p class="customize-product">${escapeHTML(pick(prod.name))}</p>
+          <fieldset class="customize-options">
+            <legend>${escapeHTML(this.t('customizeLeaveOut') || 'Leave out')}</legend>
+            ${prod.exclusions.map(ex => `
+              <label class="customize-option">
+                <input type="checkbox" value="${escapeHTML(ex.id)}" />
+                <span>${escapeHTML(pick(ex))}</span>
+              </label>`).join('')}
+          </fieldset>
+          <div class="modal-actions">
+            <button type="button" class="btn btn--ghost" data-skip>${escapeHTML(this.t('customizeSkip') || 'Add as is')}</button>
+            <button type="button" class="btn btn--primary" data-add>${escapeHTML(this.t('customizeAdd') || 'Add to order')}</button>
+          </div>
         </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-          <button type="button" class="btn btn--ghost btn--sm" style="flex:1;" onclick="app.addToOrder('${productId}'); this.closest('.modal-overlay').remove()">${this.t('customizeSkip') || 'Skip — add as is'}</button>
-          <button type="button" class="btn btn--primary btn--sm" style="flex:1;" onclick="
-            const cbs = Array.from(this.closest('.modal-window').querySelectorAll('.customize-exclude-cb'));
-            const excludes = cbs.filter(cb => cb.checked).map(cb => cb.value);
-            app.addToOrder('${productId}', excludes);
-            this.closest('.modal-overlay').remove();
-          ">${this.t('customizeAdd') || 'Add to order'}</button>
-        </div>
-      </div>
-    `;
-    
-    overlay.innerHTML = html;
+      </div>`;
     document.body.appendChild(overlay);
+
+    const close = () => { this.closeDialog('customizeModal'); overlay.remove(); };
+    overlay.querySelector('[data-close]').onclick = close;
+    overlay.querySelector('[data-skip]').onclick = () => { close(); this.addToOrder(productId); };
+    overlay.querySelector('[data-add]').onclick = () => {
+      const excludes = [...overlay.querySelectorAll('input:checked')].map(i => i.value);
+      close();
+      this.addToOrder(productId, excludes);
+    };
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    this.openDialog('customizeModal', trigger, { onEscape: close });
   },
 
-  clearOrder() {
-    this.order = [];
+
+  async clearOrder() {
+    if (this.cart.length === 0) return;
+    const ok = await this.confirmDialog({
+      title: this.t('cartClearTitle'),
+      message: this.t('cartClearConfirm'),
+      okLabel: this.t('trayClear'),
+      danger: true,
+    });
+    if (!ok) return;
+    this.resetCart();
+    this.showToast(this.t('toastOrderCleared'));
+  },
+
+  resetCart() {
+    this.cart = [];
     this.orderNote = '';
     const noteEl = document.getElementById('trayOrderNote');
     if (noteEl) noteEl.value = '';
     this.appliedPromoCode = '';
     this.trayBreakdownOpen = false;
+    this.persistCart();
+    this.clearSentNotice();
     this.renderTray();
-    this.showToast(this.t('toastOrderCleared'));
+    this.syncMenuOrderState();
   },
+
 
   computeCartBreakdown(subtotalUSD = 0, enteredPromoCode = null, customEconomy = null) {
     const eco = customEconomy || this.getEconomy();
-    const subtotal = Math.max(0, Number(subtotalUSD) || 0);
-
-    // Discount Calculation
-    let discount = 0;
-    let promoCodeName = '';
-    let promoValid = false;
-    let promoExpired = false;
-
-    const testCode = (enteredPromoCode !== null ? enteredPromoCode : (this.appliedPromoCode || '')).trim().toUpperCase();
-    const activeCode = (eco.promoCode || '').trim().toUpperCase();
-
-    if (activeCode && testCode && testCode === activeCode) {
-      if (eco.promoExpiry) {
-        const expiryDate = new Date(eco.promoExpiry + 'T23:59:59');
-        if (!isNaN(expiryDate.getTime()) && new Date() > expiryDate) {
-          promoExpired = true;
-        }
-      }
-      if (!promoExpired) {
-        promoValid = true;
-        promoCodeName = activeCode;
-        const pVal = Math.max(0, Number(eco.promoValue) || 0);
-        if (eco.promoType === 'percent') {
-          discount = Math.min(subtotal, (subtotal * pVal) / 100);
-        } else {
-          discount = Math.min(subtotal, pVal);
-        }
-      }
-    }
-
-    // Delivery Calculation
-    let delivery = 0;
-    const isPickupOnly = Boolean(eco.pickupOnly);
-    let isFreeDelivery = false;
-    const fee = Math.max(0, Number(eco.deliveryFee) || 0);
-    const threshold = Math.max(0, Number(eco.freeDeliveryOver) || 0);
-
-    if (isPickupOnly) {
-      delivery = 0;
-    } else if (threshold === 0) {
-      delivery = 0;
-      isFreeDelivery = true;
-    } else if (subtotal >= threshold) {
-      delivery = 0;
-      isFreeDelivery = true;
-    } else {
-      delivery = fee;
-    }
-
-    // Tax Calculation (added only if taxEnabled and taxIncluded === false)
-    let tax = 0;
-    const taxRate = Math.min(30, Math.max(0, Number(eco.taxRate) || 0));
-    const taxableAmount = Math.max(0, subtotal - discount);
-    const taxLabel = (eco.taxLabel || 'VAT').trim();
-
-    if (eco.taxEnabled && !eco.taxIncluded && taxRate > 0) {
-      tax = (taxableAmount * taxRate) / 100;
-    }
-
-    const total = Math.max(0, subtotal - discount + delivery + tax);
-
-    // Minimum Order Calculation
-    const minOrder = Math.max(0, Number(eco.minimumOrder) || 0);
-    const minOrderMet = minOrder === 0 || subtotal >= minOrder;
-    const minOrderRemaining = minOrderMet ? 0 : Math.max(0, minOrder - subtotal);
-
-    return {
-      subtotal,
-      discount,
-      promoCodeName,
-      promoValid,
-      promoExpired,
-      delivery,
-      isPickupOnly,
-      isFreeDelivery,
-      deliveryFeeConfig: fee,
-      freeDeliveryOverConfig: threshold,
-      tax,
-      taxRate,
-      taxLabel,
-      taxEnabled: Boolean(eco.taxEnabled),
-      taxIncluded: Boolean(eco.taxIncluded),
-      total,
-      minOrder,
-      minOrderMet,
-      minOrderRemaining
-    };
+    const code = enteredPromoCode !== null ? enteredPromoCode : (this.appliedPromoCode || '');
+    return computeBreakdown(subtotalUSD, eco, code);
   },
 
-  toggleTrayBreakdown() {
-    this.trayBreakdownOpen = !this.trayBreakdownOpen;
+
+  toggleTrayBreakdown(force = null) {
+    this.trayBreakdownOpen = force === null ? !this.trayBreakdownOpen : Boolean(force);
     const bd = document.getElementById('trayBreakdown');
-    const toggleBtn = document.getElementById('btnTrayToggle');
+    const tray = document.getElementById('orderTray');
     const label = document.getElementById('trayToggleLabel');
-    if (bd) bd.style.display = this.trayBreakdownOpen ? 'flex' : 'none';
-    if (toggleBtn) toggleBtn.setAttribute('aria-expanded', this.trayBreakdownOpen ? 'true' : 'false');
+    if (bd) bd.hidden = !this.trayBreakdownOpen;
+    if (tray) tray.classList.toggle('is-expanded', this.trayBreakdownOpen);
+    document.querySelectorAll('[aria-controls="trayBreakdown"]').forEach(b => b.setAttribute('aria-expanded', this.trayBreakdownOpen ? 'true' : 'false'));
     if (label) label.textContent = this.trayBreakdownOpen ? this.t('trayDetailsClose') : this.t('trayDetails');
+    if (this.trayBreakdownOpen) this.prepareFulfillmentInput();
   },
+
 
   applyCartPromo() {
     const input = document.getElementById('trayPromoInput');
     if (!input) return;
-    const code = input.value.trim().toUpperCase();
-    if (!code) return;
-
-    const eco = this.getEconomy();
-    const activeCode = (eco.promoCode || '').trim().toUpperCase();
-
-    if (!activeCode || code !== activeCode) {
-      this.showToast(this.t('invalidPromo'), 'error');
-      const feedback = document.getElementById('trayPromoFeedback');
-      if (feedback) {
-        feedback.textContent = '✕ Invalid promo code';
-        feedback.style.color = '#fca5a5';
-      }
+    const feedback = document.getElementById('trayPromoFeedback');
+    const result = checkPromo(this.getEconomy(), input.value);
+    if (result.status === 'empty') return;
+    if (result.status !== 'valid') {
+      const msg = result.status === 'expired' ? this.t('promoExpired') : this.t('invalidPromo');
+      if (feedback) { feedback.textContent = msg; feedback.dataset.state = 'error'; }
+      input.setAttribute('aria-invalid', 'true');
       return;
     }
-
-    // Check expiry
-    if (eco.promoExpiry) {
-      const expDate = new Date(eco.promoExpiry + 'T23:59:59');
-      if (!isNaN(expDate.getTime()) && new Date() > expDate) {
-        this.showToast(this.t('promoExpired'), 'error');
-        const feedback = document.getElementById('trayPromoFeedback');
-        if (feedback) {
-          feedback.textContent = `⚠️ ${this.t('promoExpired')}`;
-          feedback.style.color = '#fca5a5';
-        }
-        return;
-      }
-    }
-
-    this.appliedPromoCode = activeCode;
-    const msg = this.t('promoApplied').replace('{code}', activeCode);
-    this.showToast(msg, 'success');
+    this.appliedPromoCode = result.code;
+    this.showToast(this.t('promoApplied').replace('{code}', result.code), 'success');
     this.renderTray();
   },
+
 
   removeCartPromo() {
     this.appliedPromoCode = '';
@@ -2560,361 +2858,407 @@ const app = {
     const tray = document.getElementById('orderTray');
     if (!tray) return;
 
-    const isKu = this.lang === 'ku';
-    const productMap = new Map(this.products.map(p => [p.id, p]));
+    const lines = priceLines(this.cart, this.products, this.lang);
+    const count = cartCount(lines);
+    const subtotalUSD = cartSubtotal(lines);
 
-    let totalCount = 0;
-    let subtotalUSD = 0;
-    const itemNames = [];
+    document.body.classList.toggle('has-order-tray', count > 0);
+    this.syncMenuOrderState();
 
-    for (const item of this.order) {
-      if (item.qty > 0 && productMap.has(item.productId)) {
-        const prod = productMap.get(item.productId);
-        totalCount += item.qty;
-        subtotalUSD += prod.priceUSD * item.qty;
-        const name = isKu ? (prod.name.ku || prod.name.en) : prod.name.en;
-        itemNames.push(`${item.qty}× ${name}`);
-      }
-    }
-
-    if (totalCount === 0) {
-      tray.classList.remove('is-visible');
+    if (count === 0) {
+      tray.classList.remove('is-visible', 'is-expanded');
       this.trayBreakdownOpen = false;
       const bd = document.getElementById('trayBreakdown');
-      if (bd) bd.style.display = 'none';
+      if (bd) bd.hidden = true;
       return;
     }
-
     tray.classList.add('is-visible');
 
     const breakdown = this.computeCartBreakdown(subtotalUSD);
-
-    const noteEl = document.getElementById('trayOrderNote');
-    if (noteEl && noteEl.value !== this.orderNote) {
-      noteEl.value = this.orderNote || '';
-    }
-    const countEl = document.getElementById('trayItemCount');
-    if (countEl) countEl.textContent = totalCount;
-
-    const priceEl = document.getElementById('trayTotalPrice');
-    if (priceEl) priceEl.textContent = this.formatPrice(breakdown.total);
-
-    const previewEl = document.getElementById('trayPreviewText');
-    if (previewEl) previewEl.textContent = itemNames.join(', ');
+    const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    setText('trayItemCount', count);
+    setText('trayTotalPrice', this.formatPrice(breakdown.total));
+    setText('trayPreviewText', lines.map(l => `${l.qty}× ${l.name}`).join(', '));
+    const countLabel = document.getElementById('trayItemCount');
+    if (countLabel) countLabel.setAttribute('aria-label', this.t('trayItemsLabel').replace('{n}', count));
 
     const freeBadge = document.getElementById('trayFreeDeliveryBadge');
-    if (freeBadge) {
-      freeBadge.style.display = (breakdown.isFreeDelivery && !breakdown.isPickupOnly) ? 'inline-block' : 'none';
+    if (freeBadge) freeBadge.hidden = !(breakdown.isFreeDelivery && !breakdown.isPickupOnly);
+
+    const noteEl = document.getElementById('trayOrderNote');
+    if (noteEl && noteEl.value !== this.orderNote) noteEl.value = this.orderNote || '';
+
+    // Editable lines
+    const linesEl = document.getElementById('trayLines');
+    if (linesEl) {
+      linesEl.innerHTML = lines.map(l => `
+        <li class="tray-line" data-line="${escapeHTML(l.id)}">
+          <div class="tray-line__info">
+            <span class="tray-line__name">${escapeHTML(l.name)}</span>
+            ${l.excludeLabels.length ? `<span class="tray-line__custom">${escapeHTML(this.t('waExclude') || 'No')} ${escapeHTML(l.excludeLabels.join(', '))}</span>` : ''}
+            <span class="tray-line__unit">${escapeHTML(this.t('cartEach').replace('{price}', this.formatPrice(l.unitPriceUSD)))}</span>
+          </div>
+          <div class="tray-line__qty" role="group" aria-label="${escapeHTML(this.t('cartQtyLabel').replace('{name}', l.name))}">
+            <button type="button" class="qty-btn" data-qty-action="dec" onclick="app.changeCartQty(${jsArg(l.id)}, -1)" aria-label="${escapeHTML(this.t('cartDecrease').replace('{name}', l.name))}">−</button>
+            <output class="qty-value" aria-live="polite">${l.qty}</output>
+            <button type="button" class="qty-btn" data-qty-action="inc" onclick="app.changeCartQty(${jsArg(l.id)}, 1)" aria-label="${escapeHTML(this.t('cartIncrease').replace('{name}', l.name))}" ${l.qty >= 99 ? 'disabled' : ''}>+</button>
+          </div>
+          <span class="tray-line__total">${escapeHTML(this.formatPrice(l.lineTotalUSD))}</span>
+          <button type="button" class="tray-line__remove" onclick="app.removeCartLine(${jsArg(l.id)})" aria-label="${escapeHTML(this.t('cartRemove').replace('{name}', l.name))}">✕</button>
+        </li>`).join('');
     }
 
-    // Minimum order warning & WhatsApp button disabled state
+    // Minimum order warning & send button state
     const btnSend = document.getElementById('btnTrayWhatsApp');
     const minNotice = document.getElementById('trayMinOrderNotice');
     if (!breakdown.minOrderMet) {
-      const minText = this.formatPrice(breakdown.minOrder);
-      const remText = this.formatPrice(breakdown.minOrderRemaining);
       const warnMsg = this.t('minimumOrderWarning')
-        .replace('{amount}', minText)
-        .replace('{remaining}', remText);
-
-      if (btnSend) {
-        btnSend.disabled = true;
-        btnSend.classList.add('is-disabled');
-        btnSend.title = warnMsg;
-      }
-      if (minNotice) {
-        minNotice.style.display = 'flex';
-        minNotice.innerHTML = `<span>⚠️</span> <span>${warnMsg}</span>`;
-      }
+        .replace('{amount}', this.formatPrice(breakdown.minOrder))
+        .replace('{remaining}', this.formatPrice(breakdown.minOrderRemaining));
+      if (btnSend) { btnSend.disabled = true; btnSend.classList.add('is-disabled'); btnSend.title = warnMsg; }
+      if (minNotice) { minNotice.hidden = false; minNotice.textContent = warnMsg; }
     } else {
-      if (btnSend) {
-        btnSend.disabled = false;
-        btnSend.classList.remove('is-disabled');
-        btnSend.removeAttribute('title');
-      }
-      if (minNotice) {
-        minNotice.style.display = 'none';
-        minNotice.innerHTML = '';
-      }
+      if (btnSend) { btnSend.disabled = false; btnSend.classList.remove('is-disabled'); btnSend.removeAttribute('title'); }
+      if (minNotice) { minNotice.hidden = true; minNotice.textContent = ''; }
     }
 
-    // Detailed breakdown rows in drawer
+    // Totals
     const bdLines = document.getElementById('trayBreakdownLines');
     if (bdLines) {
-      let rows = '';
-      rows += `<div class="tray-breakdown-row"><span>${this.t('subtotal')}</span><span>${this.formatPrice(breakdown.subtotal)}</span></div>`;
-
-      if (breakdown.discount > 0) {
-        rows += `<div class="tray-breakdown-row" style="color:#4ade80;"><span>${this.t('discount')} (${breakdown.promoCodeName})</span><span>−${this.formatPrice(breakdown.discount)}</span></div>`;
-      }
-
-      if (breakdown.isPickupOnly) {
-        rows += `<div class="tray-breakdown-row"><span>${this.t('economyDelivery')}</span><span>${isKu ? 'وەرگرتن لە چێشتخانە' : 'Pickup Only'}</span></div>`;
-      } else if (breakdown.isFreeDelivery) {
-        rows += `<div class="tray-breakdown-row"><span>${this.t('deliveryFee')}</span><span style="color:#4ade80;font-weight:700;">${this.t('freeDelivery')}</span></div>`;
-      } else {
-        rows += `<div class="tray-breakdown-row"><span>${this.t('deliveryFee')}</span><span>${this.formatPrice(breakdown.delivery)}</span></div>`;
-      }
-
-      if (breakdown.tax > 0) {
-        rows += `<div class="tray-breakdown-row"><span>${this.t('tax')} (${breakdown.taxLabel} ${breakdown.taxRate}%)</span><span>+${this.formatPrice(breakdown.tax)}</span></div>`;
-      }
-
-      rows += `<div class="tray-breakdown-row tray-breakdown-row--total"><span>${this.t('total')}</span><span style="color:var(--berry);">${this.formatPrice(breakdown.total)}</span></div>`;
-
+      const row = (label, value, cls = '') => `<div class="tray-breakdown-row ${cls}"><span>${escapeHTML(label)}</span><span>${escapeHTML(value)}</span></div>`;
+      let rows = row(this.t('subtotal'), this.formatPrice(breakdown.subtotal));
+      if (breakdown.discount > 0) rows += row(`${this.t('discount')} (${breakdown.promoCodeName})`, '−' + this.formatPrice(breakdown.discount), 'tray-breakdown-row--discount');
+      if (breakdown.isPickupOnly) rows += row(this.t('economyDelivery'), this.t('pickupOnlyLabel'));
+      else if (breakdown.isFreeDelivery) rows += row(this.t('deliveryFee'), this.t('freeDelivery'), 'tray-breakdown-row--free');
+      else rows += row(this.t('deliveryFee'), this.formatPrice(breakdown.delivery));
+      if (breakdown.tax > 0) rows += row(`${this.t('tax')} (${breakdown.taxLabel} ${breakdown.taxRate}%)`, '+' + this.formatPrice(breakdown.tax));
+      else if (breakdown.taxEnabled && breakdown.taxIncluded && breakdown.taxRate > 0) rows += row(`${breakdown.taxLabel} ${breakdown.taxRate}%`, this.t('taxIncludedLabel'));
+      rows += row(this.t('total'), this.formatPrice(breakdown.total), 'tray-breakdown-row--total');
       bdLines.innerHTML = rows;
     }
 
-    // Promo code input / applied banner
+    // Promo code
     const promoArea = document.getElementById('trayPromoArea');
     if (promoArea) {
+      const hasPromo = Boolean(String(this.getEconomy().promoCode || '').trim());
+      promoArea.hidden = !hasPromo && !breakdown.promoValid;
       if (breakdown.promoValid) {
         promoArea.innerHTML = `
-          <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.3);padding:6px 12px;border-radius:8px;font-size:0.82rem;">
-            <span style="color:#4ade80;font-weight:600;">✓ ${this.t('promoApplied').replace('{code}', breakdown.promoCodeName)}</span>
-            <button type="button" class="btn btn--xs btn--ghost" style="padding:2px 6px;color:#fca5a5;border:none;" onclick="app.removeCartPromo()">✕ ${this.t('trayRemovePromo')}</button>
-          </div>
-        `;
-      } else {
+          <div class="tray-promo-applied">
+            <span>✓ ${escapeHTML(this.t('promoApplied').replace('{code}', breakdown.promoCodeName))}</span>
+            <button type="button" class="tray-btn tray-btn--quiet tray-btn--small" onclick="app.removeCartPromo()">${escapeHTML(this.t('trayRemovePromo'))}</button>
+          </div>`;
+      } else if (!document.getElementById('trayPromoInput')) {
         promoArea.innerHTML = `
+          <label class="tray-field__label" for="trayPromoInput">${escapeHTML(this.t('trayPromoPlaceholder'))}</label>
           <div class="tray-promo-row">
-            <input type="text" id="trayPromoInput" class="tray-promo-input" placeholder="${this.t('trayPromoPlaceholder')}..." maxlength="20" onkeydown="if(event.key==='Enter'){event.preventDefault();app.applyCartPromo();}" />
-            <button type="button" class="btn btn--xs btn--primary" id="btnApplyPromo" onclick="app.applyCartPromo()">${this.t('trayApplyPromo')}</button>
+            <input type="text" id="trayPromoInput" class="tray-promo-input" maxlength="20" autocomplete="off" aria-describedby="trayPromoFeedback" onkeydown="if(event.key==='Enter'){event.preventDefault();app.applyCartPromo();}" />
+            <button type="button" class="tray-btn tray-btn--quiet tray-btn--small" id="btnApplyPromo" onclick="app.applyCartPromo()">${escapeHTML(this.t('trayApplyPromo'))}</button>
           </div>
-          <div id="trayPromoFeedback" class="tray-promo-feedback"></div>
-        `;
+          <div id="trayPromoFeedback" class="tray-promo-feedback" role="status"></div>`;
       }
     }
 
-    // Guest notice in tray
     const guestNotice = document.getElementById('trayGuestNotice');
-    if (guestNotice) {
-      guestNotice.style.display = !this.session ? 'block' : 'none';
+    if (guestNotice) guestNotice.hidden = Boolean(this.session);
+  },
+
+  // Date input: minimum = now + lead time; hint shows the earliest slot in the user's language.
+  prepareFulfillmentInput() {
+    const input = document.getElementById('trayFulfillmentDate');
+    if (!input) return;
+    const hours = leadHours(this.getEconomy());
+    const earliest = earliestFulfillment(new Date(), hours);
+    input.min = toLocalInputValue(earliest);
+    const hint = document.getElementById('trayDateHint');
+    if (hint) {
+      hint.textContent = this.t('trayDateHint')
+        .replace('{hours}', hours)
+        .replace('{date}', formatFulfillment(earliest, this.lang));
+    }
+    this.prefillCheckoutDetails();
+  },
+
+  // Fill empty checkout fields from the signed-in profile or this device's saved details.
+  prefillCheckoutDetails() {
+    const saved = this.cacheGet(KEYS.GUEST, null) || {};
+    const src = {
+      name: (this.profile && this.profile.name) || saved.name || (this.session && this.session.name) || '',
+      phone: (this.profile && this.profile.phone) || saved.phone || (this.session && this.session.phone) || '',
+      address: (this.profile && this.profile.address) || saved.address || '',
+    };
+    [['trayCustName', 'name'], ['trayCustPhone', 'phone'], ['trayCustAddress', 'address']].forEach(([id, key]) => {
+      const el = document.getElementById(id);
+      if (el && !el.value && src[key]) el.value = src[key];
+    });
+    const remember = document.getElementById('trayRememberDetails');
+    if (remember && saved.name) remember.checked = true;
+  },
+
+  setCheckoutError(message, fieldId = null) {
+    const el = document.getElementById('trayCheckoutError');
+    if (el) {
+      el.textContent = message || '';
+      el.hidden = !message;
+    }
+    document.querySelectorAll('#trayBreakdown [aria-invalid="true"]').forEach(i => i.removeAttribute('aria-invalid'));
+    if (fieldId) {
+      const field = document.getElementById(fieldId);
+      if (field) {
+        field.setAttribute('aria-invalid', 'true');
+        field.focus();
+      }
     }
   },
 
-  checkoutWhatsApp() {
-    const productMap = new Map(this.products.map(p => [p.id, p]));
-    const isKu = this.lang === 'ku';
-    const c = this.config;
+  clearSentNotice() {
+    const notice = document.getElementById('traySentNotice');
+    if (notice) notice.hidden = true;
+    this.lastSentSignature = null;
+  },
+
+
+  // Builds the WhatsApp message from current prices, opens WhatsApp, and records the order.
+  // Opening WhatsApp does not prove the message was sent, so the tray stays until the customer clears it.
+  async checkoutWhatsApp() {
+    if (this.checkoutInFlight) return;
+    const lines = priceLines(this.cart, this.products, this.lang);
+    if (lines.length === 0) return;
     const eco = this.getEconomy();
-    const shopName = isKu ? (c.shopName.ku || c.shopName.en) : c.shopName.en;
+    const breakdown = this.computeCartBreakdown(cartSubtotal(lines));
 
-    const items = [];
-    const snapshottedItems = [];
-    let subtotalUSD = 0;
+    if (!this.trayBreakdownOpen) this.toggleTrayBreakdown(true);
+    this.setCheckoutError('');
 
-    for (const item of this.order) {
-      if (item.qty > 0 && productMap.has(item.productId)) {
-        const p = productMap.get(item.productId);
-        const itemSubtotal = p.priceUSD * item.qty;
-        subtotalUSD += itemSubtotal;
-        const name = isKu ? (p.name.ku || p.name.en) : p.name.en;
-        
-        let line = `• ${item.qty} × ${name} — ${itemSubtotal.toFixed(2)}`;
-        if (item.exclude && item.exclude.length > 0) {
-          const exLabels = item.exclude.map(exId => {
-            if (p.exclusions) {
-              const exDef = p.exclusions.find(x => x.id === exId);
-              if (exDef) return isKu ? (exDef.ku || exDef.en) : exDef.en;
-            }
-            return exId;
-          });
-          const noWord = this.t('waExclude') || 'No';
-          line += `\n   ${noWord} ${exLabels.join(' · ' + noWord + ' ')}`;
-        }
-        items.push(line);
-        
-        snapshottedItems.push({
-          productId: p.id,
-          qty: item.qty,
-          exclude: item.exclude || [],
-          nameSnapshot: name,
-          usdSnapshot: p.priceUSD
-        });
-      }
-    }
-
-    if (items.length === 0) return;
-
-    const breakdown = this.computeCartBreakdown(subtotalUSD);
-
-    const dateInput = document.getElementById('trayFulfillmentDate');
-    const fulfillmentDate = dateInput ? dateInput.value : '';
-    
-    if (dateInput && !fulfillmentDate) {
-      this.showToast('Please select a requested delivery/pickup date.', 'warning');
-      dateInput.focus();
-      return;
-    }
-
-    // Minimum order check
     if (!breakdown.minOrderMet) {
-      const minText = this.formatPrice(breakdown.minOrder);
-      const remText = this.formatPrice(breakdown.minOrderRemaining);
-      const warnMsg = this.t('minimumOrderWarning')
-        .replace('{amount}', minText)
-        .replace('{remaining}', remText);
-      this.showToast(warnMsg, 'warning');
+      this.setCheckoutError(this.t('minimumOrderWarning')
+        .replace('{amount}', this.formatPrice(breakdown.minOrder))
+        .replace('{remaining}', this.formatPrice(breakdown.minOrderRemaining)));
       return;
     }
 
-    // Build breakdown lines (omit 0 values)
-    const breakdownLines = [];
-    breakdownLines.push(`${this.t('subtotal')}: $${breakdown.subtotal.toFixed(2)}`);
-
-    if (breakdown.discount > 0) {
-      const promoSuffix = breakdown.promoCodeName ? ` (${breakdown.promoCodeName})` : '';
-      breakdownLines.push(`${this.t('discount')}${promoSuffix}: −$${breakdown.discount.toFixed(2)}`);
+    const name = (document.getElementById('trayCustName')?.value || '').trim();
+    const phone = (document.getElementById('trayCustPhone')?.value || '').trim();
+    const address = (document.getElementById('trayCustAddress')?.value || '').trim();
+    if (!name) {
+      this.setCheckoutError(this.t('checkoutNeedName'), 'trayCustName');
+      return;
     }
 
-    if (!breakdown.isPickupOnly) {
-      if (breakdown.isFreeDelivery) {
-        breakdownLines.push(`${this.t('deliveryFee')}: ${this.t('freeDelivery')}`);
-      } else if (breakdown.delivery > 0) {
-        breakdownLines.push(`${this.t('deliveryFee')}: $${breakdown.delivery.toFixed(2)}`);
-      }
-    } else {
-      breakdownLines.push(`${this.t('fieldPickupOnly')}: ${isKu ? 'وەرگرتن لە چێشتخانە' : 'Pickup available'}`);
+    const dateValue = document.getElementById('trayFulfillmentDate')?.value || '';
+    const dateCheck = validateFulfillment(dateValue, new Date(), leadHours(eco));
+    if (!dateCheck.ok) {
+      const key = { missing: 'checkoutNeedDate', invalid: 'checkoutBadDate', 'too-soon': 'checkoutDateTooSoon', 'too-far': 'checkoutDateTooFar' }[dateCheck.error];
+      const msg = this.t(key)
+        .replace('{hours}', leadHours(eco))
+        .replace('{date}', dateCheck.earliest ? formatFulfillment(dateCheck.earliest, this.lang) : '');
+      this.setCheckoutError(msg, 'trayFulfillmentDate');
+      return;
     }
 
-    if (breakdown.tax > 0) {
-      breakdownLines.push(`${this.t('tax')} (${breakdown.taxLabel} ${breakdown.taxRate}%): +$${breakdown.tax.toFixed(2)}`);
+    const waNumber = normalizeWhatsAppNumber(this.config.contact.whatsapp);
+    if (!waNumber) {
+      this.setCheckoutError(this.t('checkoutNoWhatsApp'));
+      return;
     }
 
-    breakdownLines.push('────────────────');
-
-    let totalLine = `${this.t('total')}: $${breakdown.total.toFixed(2)}`;
-    if (this.currency !== 'USD' && eco.showSecondary !== false && eco.secondaryCurrency && eco.secondaryCurrency !== 'None') {
-      const secondaryFormatted = this.formatPrice(breakdown.total);
-      totalLine = `${this.t('total')}: ${secondaryFormatted} ($${breakdown.total.toFixed(2)} USD)`;
-    }
-    breakdownLines.push(totalLine);
-
-    let customerName = '';
-    if (this.session && this.session.user && this.session.user.name) {
-      customerName = this.session.user.name;
+    // Same cart sent moments ago: ask before opening a second order.
+    const signature = JSON.stringify([this.cart, dateValue, name]);
+    if (this.lastSentSignature === signature) {
+      const again = await this.confirmDialog({ title: this.t('checkoutAgainTitle'), message: this.t('checkoutAgainConfirm'), okLabel: this.t('checkoutAgainOk') });
+      if (!again) return;
     }
 
-    let msg = '';
-    if (isKu) {
-      msg = `سڵاو لە ${shopName}! دەمەوێت ئەم داواکارییە تۆمار بکەم:\n\n${items.join('\n')}\n\n${breakdownLines.join('\n')}\n\nناوی کڕیار: ${customerName}\nبەروار و کاتی گەیاندن: ${fulfillmentDate}\nناونیشانی تەواو: `;
-    } else {
-      msg = `Hello ${shopName}! I'd like to place an order:\n\n${items.join('\n')}\n\n${breakdownLines.join('\n')}\n\nCustomer Name: ${customerName}\nPreferred Delivery Date/Time: ${fulfillmentDate}\nDelivery Address: `;
-    }
+    const remember = document.getElementById('trayRememberDetails');
+    if (remember && remember.checked) this.cacheSet(KEYS.GUEST, { name, phone, address });
+    else if (remember) { try { localStorage.removeItem(KEYS.GUEST); } catch { /* ignore */ } }
 
-    if (this.orderNote) {
-      msg += `\n\n${this.t('waNote') || 'Note for the baker'}: ${this.orderNote}`;
-    }
+    const orderRef = 'YS-' + Date.now().toString(36).toUpperCase().slice(-6);
+    const fmt = v => this.formatPrice(v);
+    const message = buildOrderMessage({
+      lang: this.lang,
+      shopName: this.getShopName(),
+      lines,
+      breakdown,
+      fmt,
+      customer: { name, phone, address },
+      fulfillmentText: formatFulfillment(dateCheck.date, this.lang),
+      note: (this.orderNote || '').trim(),
+      orderRef,
+    });
+    const url = buildWhatsAppUrl(waNumber, message);
 
-    // Save immutable snapshot to orders history if user is signed in
-    if (this.session && this.session.user) {
-      const u = this.session.user;
-      const orderRecord = {
-        id: 'ord_' + Date.now(),
-        customerId: u.id || ('u_' + Date.now()),
-        customerName: u.name || u.username || 'Customer',
-        customerMobile: u.phone || u.mobile || '',
+    // Open synchronously from the click so pop-up blockers allow it.
+    const win = window.open(url, '_blank');
+    if (win) { try { win.opener = null; } catch { /* cross-origin */ } }
+    this.lastSentSignature = signature;
+    this.showSentNotice(url, Boolean(win));
+
+    // Record the order (device history always; Firestore when signed in).
+    this.checkoutInFlight = true;
+    try {
+      const record = buildOrderRecord({
+        customerId: this.session ? this.session.uid : 'guest',
+        customer: { name, phone, address },
+        lines,
+        eco,
+        promoCode: this.appliedPromoCode,
+        currency: this.currency,
+        fulfillmentAt: dateCheck.date,
+        note: this.orderNote,
+        lang: this.lang,
+        ref: orderRef,
+      });
+      this.localOrders = [{
+        id: orderRef,
+        ref: orderRef,
+        items: record.items,
+        totals: record.totals,
+        fulfillmentAt: dateCheck.date.getTime(),
+        note: record.note,
+        status: 'sent',
         createdAt: Date.now(),
-        status: 'pending',
-        items: snapshottedItems,
-        economy: {
-          currency: this.currency,
-          exchangeRate: Number(eco.exchangeRate) || 1310,
-          subtotal: breakdown.subtotal,
-          discount: breakdown.discount,
-          deliveryFee: breakdown.delivery,
-          tax: breakdown.tax,
-          total: breakdown.total,
-          secondaryCurrency: eco.secondaryCurrency || 'IQD',
-          roundingRule: eco.roundingRule || 250,
-          currencySymbol: eco.currencySymbol || 'د.ع'
-        },
-        notes: '',
-        deliveryDate: '',
-        deliveryAddress: ''
-      };
-      this.orders.unshift(orderRecord);
-      this.saveOrders();
+      }, ...this.localOrders].slice(0, 50);
+      this.cacheSet(KEYS.MY_ORDERS, this.localOrders);
+
+      if (this.session && firebaseReady()) {
+        const problems = validateOrderRecord(record);
+        if (problems.length) throw Object.assign(new Error('invalid order: ' + problems.join(',')), { code: 'invalid-argument' });
+        await loadStore();
+        await store.createOrder(record);
+        this.announce(this.t('orderSavedToHistory'));
+      }
+    } catch (e) {
+      console.warn('Order not saved to history:', describeDataError(e));
+      this.showToast(this.t('orderHistorySaveFailed'), 'warning');
+    } finally {
+      this.checkoutInFlight = false;
       this.updateAuthUI();
     }
-
-    const whatsappNum = (this.config.contact.whatsapp || WHATSAPP_NUMBER).replace(/\D/g, '');
-    const url = `https://wa.me/${whatsappNum}?text=${encodeURIComponent(msg)}`;
-    window.open(url, '_blank');
   },
+
+  showSentNotice(url, opened) {
+    const notice = document.getElementById('traySentNotice');
+    if (!notice) return;
+    const text = document.getElementById('traySentText');
+    if (text) text.textContent = opened ? this.t('checkoutOpened') : this.t('checkoutBlocked');
+    const link = document.getElementById('traySentLink');
+    if (link) link.href = url;
+    notice.hidden = false;
+    this.showToast(opened ? this.t('checkoutOpened') : this.t('checkoutBlocked'), opened ? 'success' : 'warning');
+  },
+
+  finishSentOrder() {
+    this.resetCart();
+    this.showToast(this.t('trayClearedAfterSend'), 'success');
+  },
+
 
   openWhatsAppDirect() {
-    const whatsappNum = (this.config.contact.whatsapp || WHATSAPP_NUMBER).replace(/\D/g, '');
     const isKu = this.lang === 'ku';
-    const shopName = isKu ? (this.config.shopName.ku || this.config.shopName.en) : this.config.shopName.en;
+    const shopName = this.getShopName();
     const msg = isKu ? `سڵاو ${shopName}! دەمەوێت پرسیار لەسەر کێکەکان بکەم.` : `Hello ${shopName}! I have an inquiry regarding your cakes.`;
-    window.open(`https://wa.me/${whatsappNum}?text=${encodeURIComponent(msg)}`, '_blank');
+    const url = buildWhatsAppUrl(this.config.contact.whatsapp, msg);
+    if (!url) {
+      this.showToast(this.t('checkoutNoWhatsApp'), 'error');
+      return;
+    }
+    const win = window.open(url, '_blank');
+    if (win) { try { win.opener = null; } catch { /* cross-origin */ } }
   },
 
+
   // Auth System: Customer & Staff (Admin / Developer)
+  // Auth System: header chip derived from the Firebase session
+  // Auth System: header controls derived from the Firebase session.
+  // Desktop shows a compact account menu; the mobile drawer lists the same actions inline.
   updateAuthUI() {
     const desktopContainer = document.getElementById('desktopAuthContainer');
     const mobileContainer = document.getElementById('mobileAuthContainer');
+    const s = this.session;
+    const hasHistory = (this.localOrders && this.localOrders.length > 0) || Boolean(s);
+    const ordersBtn = cls => hasHistory
+      ? `<button type="button" class="${cls}" onclick="app.closeAccountMenu();app.openHistoryModal()">${escapeHTML(this.t('myOrdersBtn'))}</button>`
+      : '';
 
-    let html = '';
-    if (!this.session) {
-      html = `<button class="btn btn--primary btn--sm" onclick="app.openAuthModal()">${this.t('btnSignIn')}</button>`;
+    let desktop;
+    let mobile;
+    if (!s) {
+      desktop = `
+        <div class="auth-actions">
+          ${ordersBtn('btn btn--ghost btn--sm')}
+          <button type="button" class="btn btn--primary btn--sm" id="btnSignInDesktop" onclick="app.openAuthModal()">${escapeHTML(this.t('btnSignIn'))}</button>
+        </div>`;
+      mobile = desktop.replace('id="btnSignInDesktop"', 'id="btnSignInMobile"');
     } else {
-      const u = this.session.user;
-      const isStaff = u.role === 'admin' || u.role === 'dev' || u.role === 'staff';
-      const isCustomer = u.role === 'customer';
-      const roleBadgeClass = u.role === 'dev' ? 'badge--dev' : (u.role === 'admin' ? 'badge--admin' : 'badge--customer');
-
-      const custOrders = this.getCustomerOrders(u.id, u.phone);
-      const hasRecentOrder = isCustomer && custOrders.some(o => (Date.now() - o.createdAt < 24 * 60 * 60 * 1000));
-
-      const myOrdersBtn = isCustomer ? `
-        <button type="button" class="btn btn--ghost btn--sm my-orders-btn" onclick="app.openHistoryModal()">
-          ${hasRecentOrder ? '<span class="order-badge-dot" title="Recent order active"></span>' : ''}
-          <span>${this.t('myOrders')}</span>
-        </button>
-      ` : '';
-
-      html = `
-        <div class="user-chip">
-          <span class="badge ${roleBadgeClass}">${u.role.toUpperCase()}</span>
-          <span style="font-weight:600;">${u.name || u.username}</span>
-          ${myOrdersBtn}
-          ${isStaff ? `<button class="btn btn--ghost btn--sm" style="padding:4px 8px;font-size:0.78rem;" onclick="app.openPanelModal()">${this.t('btnPanel')}</button>` : ''}
-          <button class="btn btn--ghost btn--sm" style="padding:4px 8px;font-size:0.78rem;" onclick="app.logout()" title="${this.t('btnLogout')}">✕</button>
-        </div>
-      `;
+      const privileged = isPrivileged(s);
+      const display = s.name || s.email || this.t('customerFallbackName');
+      const badge = privileged ? `<span class="badge ${s.role === 'dev' ? 'badge--dev' : 'badge--admin'}">${escapeHTML(this.t('role_' + s.role) || s.role)}</span>` : '';
+      const items = cls => `
+          ${ordersBtn(cls)}
+          ${privileged ? `<button type="button" class="${cls}" onclick="app.closeAccountMenu();app.openPanelModal()">${escapeHTML(this.t('btnPanel'))}</button>` : ''}
+          <button type="button" class="${cls}" onclick="app.closeAccountMenu();app.logout()">${escapeHTML(this.t('btnLogout'))}</button>`;
+      desktop = `
+        <div class="account-menu">
+          <button type="button" class="btn btn--ghost btn--sm account-menu__toggle" id="accountMenuToggle" aria-expanded="false" aria-controls="accountMenuList" onclick="app.toggleAccountMenu()">
+            ${badge}<span class="user-chip__name">${escapeHTML(display)}</span><span aria-hidden="true">▾</span>
+          </button>
+          <div class="account-menu__list" id="accountMenuList" hidden>${items('account-menu__item')}</div>
+        </div>`;
+      mobile = `
+        <div class="user-chip user-chip--stacked">
+          <div class="user-chip__who">${badge}<span class="user-chip__name">${escapeHTML(display)}</span></div>
+          <div class="user-chip__actions">${items('btn btn--ghost btn--sm')}</div>
+        </div>`;
     }
-
-    if (desktopContainer) desktopContainer.innerHTML = html;
-    if (mobileContainer) mobileContainer.innerHTML = html;
+    // Only touch the DOM when something changed, so focused buttons are not replaced.
+    const key = desktop + mobile;
+    if (this._authHtml !== key) {
+      if (desktopContainer) desktopContainer.innerHTML = desktop;
+      if (mobileContainer) mobileContainer.innerHTML = mobile;
+      this._authHtml = key;
+    }
   },
+
+  toggleAccountMenu(force = null) {
+    const btn = document.getElementById('accountMenuToggle');
+    const list = document.getElementById('accountMenuList');
+    if (!btn || !list) return;
+    const open = force === null ? list.hidden : Boolean(force);
+    list.hidden = !open;
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+      const first = list.querySelector('button');
+      if (first) first.focus();
+    }
+  },
+
+  closeAccountMenu() {
+    this.toggleAccountMenu(false);
+  },
+
+
 
   // Customer Order History Methods
-  getCustomerOrders(userId, userPhone) {
-    if (!this.orders) return [];
-    return this.orders.filter(o => {
-      if (userId && o.customerId === userId) return true;
-      if (userPhone && o.customerMobile && o.customerMobile.replace(/\D/g, '') === String(userPhone).replace(/\D/g, '')) return true;
-      return false;
-    });
+  // Signed-in customers see their Firestore history; everyone sees orders sent from this device.
+  getCustomerOrders() {
+    const remote = (this.session ? this.myOrders : []) || [];
+    const seen = new Set(remote.flatMap(o => [o.id, o.ref].filter(Boolean)));
+    const local = (this.localOrders || []).filter(o => !seen.has(o.id) && !seen.has(o.ref));
+    return [...remote, ...local].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   },
+
 
   openHistoryModal() {
-    if (!this.session || !this.session.user) {
-      this.openAuthModal();
-      return;
-    }
-    const modal = document.getElementById('historyModal');
-    if (modal) modal.classList.add('is-open');
     this.renderCustomerHistory();
+    this.openDialog('historyModal');
   },
 
+
   closeHistoryModal() {
-    const modal = document.getElementById('historyModal');
-    if (modal) modal.classList.remove('is-open');
+    this.closeDialog('historyModal');
   },
+
 
   toggleHistoryDetails(orderId) {
     this.historyDetailsOpen[orderId] = !this.historyDetailsOpen[orderId];
@@ -2922,583 +3266,550 @@ const app = {
   },
 
   reorderItems(orderId) {
-    const order = this.orders.find(o => o.id === orderId);
-    if (!order || !order.items || order.items.length === 0) return;
-
-    const productMap = new Map(this.products.map(p => [p.id, p]));
+    const order = this.getCustomerOrders().find(o => o.id === orderId);
+    if (!order || !Array.isArray(order.items) || order.items.length === 0) return;
     let countAdded = 0;
-
+    let cart = this.cart;
     order.items.forEach(item => {
-      if (productMap.has(item.productId)) {
-        const exclude = item.exclude || [];
-        const existing = this.order.find(o => o.productId === item.productId && o.exclude.join('|') === exclude.join('|'));
-        if (existing) {
-          existing.qty += (item.qty || 1);
-        } else {
-          this.order.push({
-            id: this.generateId(),
-            productId: item.productId,
-            qty: item.qty || 1,
-            exclude: [...exclude]
-          });
-        }
-        countAdded += (item.qty || 1);
-      }
+      if (!this.products.some(p => p.id === item.productId)) return;
+      const qty = Math.max(1, Math.min(99, Number(item.qty) || 1));
+      for (let i = 0; i < qty; i++) cart = addItem(cart, item.productId, item.exclude || []);
+      countAdded += qty;
     });
-    if (order.orderNote) {
-      this.orderNote = order.orderNote;
-    }
-
+    this.cart = sanitizeCart(cart, this.products);
+    this.persistCart();
     if (countAdded > 0) {
       this.closeHistoryModal();
       this.renderTray();
-      const msg = this.t('orderAddedToTray').replace('{count}', countAdded);
-      this.showToast(msg, 'success');
+      this.showToast(this.t('orderAddedToTray').replace('{count}', countAdded), 'success');
     } else {
       this.showToast(this.t('itemsNotAvailable'), 'warning');
     }
   },
 
+
   renderCustomerHistory() {
     const modal = document.getElementById('historyModal');
     if (!modal) return;
-
-    const u = this.session ? this.session.user : null;
-    if (!u) {
-      this.closeHistoryModal();
-      return;
-    }
-
     const isKu = this.lang === 'ku';
-    const customerOrders = this.getCustomerOrders(u.id, u.phone);
-
-    // Header & Subtitle
-    const titleEl = document.getElementById('historyModalTitle');
-    if (titleEl) titleEl.textContent = this.t('myOrdersTitle');
+    const locale = isKu ? 'ckb' : 'en-GB';
+    const orders = this.getCustomerOrders();
+    const fmtDate = (ms, withTime = true) => {
+      if (!ms) return '—';
+      try {
+        return new Date(ms).toLocaleDateString(locale, withTime
+          ? { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }
+          : { month: 'short', year: 'numeric' });
+      } catch {
+        return new Date(ms).toISOString().slice(0, 16).replace('T', ' ');
+      }
+    };
 
     const subtitleEl = document.getElementById('historyModalSubtitle');
     if (subtitleEl) {
-      if (customerOrders.length > 0) {
-        const earliest = Math.min(...customerOrders.map(o => o.createdAt || Date.now()));
-        const earliestDate = new Date(earliest).toLocaleDateString(isKu ? 'ku' : 'en-US', { month: 'short', year: 'numeric' });
-        subtitleEl.textContent = this.t('myOrdersSubtitle')
-          .replace('{count}', customerOrders.length)
-          .replace('{date}', earliestDate);
-      } else {
-        subtitleEl.textContent = this.t('myOrdersEmpty');
-      }
+      subtitleEl.textContent = orders.length
+        ? this.t('myOrdersSubtitle').replace('{count}', orders.length).replace('{date}', fmtDate(Math.min(...orders.map(o => o.createdAt || Date.now())), false))
+        : this.t('myOrdersEmpty');
     }
+    const scopeEl = document.getElementById('historyScopeNote');
+    if (scopeEl) scopeEl.textContent = this.session ? this.t('historyScopeAccount') : this.t('historyScopeDevice');
 
-    // Customer Stats Summary Bar
     const statsEl = document.getElementById('historyCustomerStats');
     if (statsEl) {
-      if (customerOrders.length > 0) {
-        const totalOrders = customerOrders.length;
-        let totalSpentUSD = 0;
-        const itemFreq = {};
-
-        customerOrders.forEach(o => {
-          totalSpentUSD += (o.economy && typeof o.economy.total === 'number') ? o.economy.total : 0;
-          if (Array.isArray(o.items)) {
-            o.items.forEach(it => {
-              const name = it.nameSnapshot || it.productId;
-              itemFreq[name] = (itemFreq[name] || 0) + (it.qty || 1);
-            });
-          }
-        });
-
-        let favItem = '—';
-        let maxCount = 0;
-        for (const [name, cnt] of Object.entries(itemFreq)) {
-          if (cnt > maxCount) {
-            maxCount = cnt;
-            favItem = name;
-          }
-        }
-
-        statsEl.style.display = 'grid';
+      if (orders.length) {
+        const spent = orders.reduce((sum, o) => sum + (Number(o.totals?.total ?? o.economy?.total) || 0), 0);
+        const freq = {};
+        orders.forEach(o => (o.items || []).forEach(it => {
+          const n = it.name || it.nameSnapshot || it.productId;
+          freq[n] = (freq[n] || 0) + (it.qty || 1);
+        }));
+        const fav = Object.entries(freq).sort((a, b) => b[1] - a[1])[0];
+        statsEl.hidden = false;
         statsEl.innerHTML = `
-          <div class="history-stat-card">
-            <span class="history-stat-label">${this.t('myOrdersTotalOrders')}</span>
-            <span class="history-stat-val">${totalOrders}</span>
-          </div>
-          <div class="history-stat-card">
-            <span class="history-stat-label">${this.t('myOrdersTotalSpent')}</span>
-            <span class="history-stat-val">${this.formatPrice(totalSpentUSD)}</span>
-          </div>
-          <div class="history-stat-card">
-            <span class="history-stat-label">${this.t('myOrdersFavourite')}</span>
-            <span class="history-stat-val" style="font-size:0.95rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${favItem}">${favItem}</span>
-          </div>
-        `;
+          <div class="history-stat-card"><span class="history-stat-label">${escapeHTML(this.t('myOrdersTotalOrders'))}</span><span class="history-stat-val">${orders.length}</span></div>
+          <div class="history-stat-card"><span class="history-stat-label">${escapeHTML(this.t('myOrdersTotalSpent'))}</span><span class="history-stat-val">${escapeHTML(this.formatPrice(spent))}</span></div>
+          <div class="history-stat-card"><span class="history-stat-label">${escapeHTML(this.t('myOrdersFavourite'))}</span><span class="history-stat-val history-stat-val--text">${escapeHTML(fav ? fav[0] : '—')}</span></div>`;
       } else {
-        statsEl.style.display = 'none';
+        statsEl.hidden = true;
         statsEl.innerHTML = '';
       }
     }
 
-    // Orders List / Empty State
     const listEl = document.getElementById('historyOrdersList');
     if (!listEl) return;
-
-    if (customerOrders.length === 0) {
+    if (!orders.length) {
       listEl.innerHTML = `
         <div class="history-empty-state">
-          <div class="history-empty-icon">📦</div>
-          <h4 class="history-empty-title">${this.t('myOrdersEmpty')}</h4>
-          <p class="history-empty-hint">${this.t('myOrdersEmptyHint')}</p>
-          <button type="button" class="btn btn--primary btn--sm" onclick="app.closeHistoryModal();document.getElementById('menu').scrollIntoView({behavior:'smooth'});">${this.t('myOrdersBrowse')}</button>
-        </div>
-      `;
+          <div class="history-empty-icon" aria-hidden="true">📦</div>
+          <h4 class="history-empty-title">${escapeHTML(this.t('myOrdersEmpty'))}</h4>
+          <p class="history-empty-hint">${escapeHTML(this.t('myOrdersEmptyHint'))}</p>
+          <button type="button" class="btn btn--primary btn--sm" onclick="app.closeHistoryModal();document.getElementById('menu').scrollIntoView();">${escapeHTML(this.t('myOrdersBrowse'))}</button>
+        </div>`;
       return;
     }
 
-    listEl.innerHTML = customerOrders.map(order => {
-      const dateStr = new Date(order.createdAt).toLocaleDateString(isKu ? 'ku' : 'en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-
-      const statusMap = {
-        pending: { label: this.t('orderStatusPending'), class: 'history-badge--pending' },
-        baking: { label: this.t('orderStatusBaking'), class: 'history-badge--baking' },
-        delivered: { label: this.t('orderStatusDelivered'), class: 'history-badge--delivered' },
-        cancelled: { label: this.t('orderStatusCancelled'), class: 'history-badge--cancelled' }
+    const statusInfo = s => {
+      const norm = { baking: 'confirmed', delivered: 'completed' }[s] || s;
+      const map = {
+        sent: ['orderStatusSent', 'history-badge--pending'],
+        pending: ['orderStatusPending', 'history-badge--pending'],
+        confirmed: ['orderStatusConfirmed', 'history-badge--baking'],
+        completed: ['orderStatusCompleted', 'history-badge--delivered'],
+        cancelled: ['orderStatusCancelled', 'history-badge--cancelled'],
       };
-      const statusInfo = statusMap[order.status] || statusMap.pending;
+      const [key, cls] = map[norm] || map.pending;
+      return { label: this.t(key), cls };
+    };
 
-      const eco = order.economy || {};
-      const totalFormatted = this.formatPrice(eco.total || 0);
+    listEl.innerHTML = orders.map(order => {
+      const st = statusInfo(order.status);
+      const totals = order.totals || { total: order.economy?.total || 0 };
+      const items = order.items || [];
       const isExpanded = Boolean(this.historyDetailsOpen[order.id]);
-
-      const itemsSummary = (order.items || []).map(it => `${it.qty}× ${it.nameSnapshot}`).join(', ');
-
-      let breakdownRows = '';
-      if (isExpanded) {
-        const itemRows = (order.items || []).map(it => `
-          <div class="history-detail-row">
-            <span>${it.qty} × ${it.nameSnapshot}</span>
-            <span>$${((it.usdSnapshot || 0) * it.qty).toFixed(2)}</span>
+      const itemName = it => it.name || it.nameSnapshot || it.productId;
+      const ref = order.ref || ('#' + String(order.id).slice(-6).toUpperCase());
+      const details = !isExpanded ? '' : `
+        <div class="history-order-details">
+          <div class="history-items-breakdown">
+            ${items.map(it => `<div class="history-detail-row"><span>${escapeHTML(it.qty)} × ${escapeHTML(itemName(it))}</span><span>${escapeHTML(this.formatPrice((it.unitPriceUSD ?? it.usdSnapshot ?? 0) * (it.qty || 1)))}</span></div>`).join('')}
+            ${order.fulfillmentAt ? `<div class="history-detail-row"><span>${escapeHTML(this.t('historyRequestedFor'))}</span><span>${escapeHTML(formatFulfillment(new Date(order.fulfillmentAt), this.lang))}</span></div>` : ''}
+            ${order.note ? `<div class="history-detail-row"><span>${escapeHTML(this.t('orderNoteLabel'))}</span><span>${escapeHTML(order.note)}</span></div>` : ''}
+            <div class="history-detail-row history-detail-row--total"><span>${escapeHTML(this.t('total'))}</span><span>${escapeHTML(this.formatPrice(totals.total || 0))}</span></div>
           </div>
-        `).join('');
-
-        let ecoRows = '';
-        if (eco.subtotal !== undefined) {
-          ecoRows += `<div class="history-detail-row" style="margin-top:6px;border-top:1px dashed var(--gold-border);padding-top:6px;"><span>${this.t('subtotal')}</span><span>${this.formatPrice(eco.subtotal)}</span></div>`;
-        }
-        if (eco.discount > 0) {
-          ecoRows += `<div class="history-detail-row" style="color:#4ade80;"><span>${this.t('discount')}</span><span>−${this.formatPrice(eco.discount)}</span></div>`;
-        }
-        if (eco.deliveryFee !== undefined) {
-          ecoRows += `<div class="history-detail-row"><span>${this.t('deliveryFee')}</span><span>${eco.deliveryFee === 0 ? this.t('freeDelivery') : this.formatPrice(eco.deliveryFee)}</span></div>`;
-        }
-        if (eco.tax > 0) {
-          ecoRows += `<div class="history-detail-row"><span>${this.t('tax')}</span><span>+${this.formatPrice(eco.tax)}</span></div>`;
-        }
-        ecoRows += `<div class="history-detail-row history-detail-row--total"><span>${this.t('total')}</span><span>${totalFormatted}</span></div>`;
-
-        breakdownRows = `
-          <div class="history-order-details">
-            <div class="history-items-breakdown">
-              ${itemRows}
-              ${ecoRows}
-            </div>
-          </div>
-        `;
-      }
-
+        </div>`;
       return `
         <article class="history-order-card">
           <div class="history-order-header">
             <div class="history-order-meta">
-              <span class="history-order-id">#${order.id.slice(-6).toUpperCase()}</span>
-              <span class="history-order-date">${dateStr}</span>
+              <span class="history-order-id">${escapeHTML(ref)}</span>
+              <span class="history-order-date">${escapeHTML(fmtDate(order.createdAt))}</span>
             </div>
-            <span class="history-badge ${statusInfo.class}">${statusInfo.label}</span>
+            <span class="history-badge ${st.cls}">${escapeHTML(st.label)}</span>
           </div>
           <div class="history-order-summary">
-            <p class="history-order-items-preview">${itemsSummary}</p>
-            <div class="history-order-price">${totalFormatted}</div>
+            <p class="history-order-items-preview">${escapeHTML(items.map(it => `${it.qty}× ${itemName(it)}`).join(', '))}</p>
+            <div class="history-order-price">${escapeHTML(this.formatPrice(totals.total || 0))}</div>
           </div>
           <div class="history-order-actions">
-            <button type="button" class="btn btn--xs btn--ghost" onclick="app.toggleHistoryDetails('${order.id}')">
-              ${isExpanded ? '▲ Hide details' : `▼ ${this.t('myOrdersDetails')}`}
-            </button>
-            <button type="button" class="btn btn--xs btn--primary" onclick="app.reorderItems('${order.id}')">
-              🔄 ${this.t('myOrdersReorder')}
-            </button>
+            <button type="button" class="btn btn--xs btn--ghost" aria-expanded="${isExpanded}" onclick="app.toggleHistoryDetails(${jsArg(order.id)})">${escapeHTML(isExpanded ? this.t('myOrdersHideDetails') : this.t('myOrdersDetails'))}</button>
+            <button type="button" class="btn btn--xs btn--primary" onclick="app.reorderItems(${jsArg(order.id)})">${escapeHTML(this.t('myOrdersReorder'))}</button>
           </div>
-          ${breakdownRows}
-        </article>
-      `;
+          ${details}
+        </article>`;
     }).join('');
   },
 
+
+  // Customer sign-in (Google). Loads Firebase Auth on first use.
   openAuthModal() {
-    const modal = document.getElementById('authModal');
-    if (modal) modal.classList.add('is-open');
+    this.initSession(true);
+    this.setAuthMessage('authMessage', '');
+    this.openDialog('authModal');
   },
+
+  openStaffLogin() {
+    this.initSession(true);
+    this.setAuthMessage('staffAuthMessage', '');
+    this.closeDialog('authModal');
+    this.openDialog('staffAuthModal');
+  },
+
+  closeStaffLogin() {
+    this.closeDialog('staffAuthModal');
+    if (window.location.hash === '#staff') history.replaceState(null, '', window.location.pathname + window.location.search);
+  },
+
+  setAuthMessage(id, message, type = 'error') {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = message || '';
+    el.hidden = !message;
+    el.dataset.type = type;
+  },
+
   closeAuthModal() {
-    const modal = document.getElementById('authModal');
-    if (modal) modal.classList.remove('is-open');
+    this.closeDialog('authModal');
   },
 
-  switchAuthTab(tab) {
-    const btnCust = document.getElementById('tabBtnCustomer');
-    const btnAdmin = document.getElementById('tabBtnAdmin');
-    const btnDev = document.getElementById('tabBtnDev');
-    const formCust = document.getElementById('customerAuthForm');
-    const formStaff = document.getElementById('staffAuthForm');
 
-    // Remove active from all tabs
-    [btnCust, btnAdmin, btnDev].forEach(b => { if (b) b.classList.remove('is-active'); });
 
-    if (tab === 'customer') {
-      if (btnCust) btnCust.classList.add('is-active');
-      if (formCust) formCust.style.display = 'block';
-      if (formStaff) formStaff.style.display = 'none';
-      this.authTargetRole = 'customer';
-    } else {
-      if (tab === 'admin' && btnAdmin) btnAdmin.classList.add('is-active');
-      if (tab === 'dev' && btnDev) btnDev.classList.add('is-active');
-      if (formCust) formCust.style.display = 'none';
-      if (formStaff) formStaff.style.display = 'block';
-      this.authTargetRole = tab; // 'admin' or 'dev'
-    }
-  },
-
-  async handleGoogleLogin(role) {
-    if (!auth) return this.showToast('Google Auth not initialized', 'error');
+  async handleGoogleLogin(target = 'customer') {
+    const msgId = target === 'staff' ? 'staffAuthMessage' : 'authMessage';
+    this.setAuthMessage(msgId, '');
     try {
-      const result = await signInWithPopup(auth, new GoogleAuthProvider());
-      const user = result.user;
-      
-      if (role === 'customer') {
-        let cust = this.users.find(u => u.id === user.uid);
-        if (!cust) {
-          cust = {
-            id: user.uid,
-            name: document.getElementById('custName').value.trim() || user.displayName || 'Customer',
-            phone: document.getElementById('custMobile').value.trim() || user.phoneNumber || 'N/A',
-            role: 'customer',
-            createdAt: Date.now()
-          };
-          this.users.push(cust);
-          this.saveUsers();
-        }
-        this.session = { user: cust, expires: Date.now() + 86400000 };
-        localStorage.setItem('yummy_session', JSON.stringify(this.session));
-        this.closeAuthModal();
-        this.showToast(this.t('loginSuccess') || 'Logged in successfully!', 'success');
-        this.renderMenu();
-        
-      } else {
-        const isSuperAdmin = (['qaessafty@gmail.com', 'yumy.swets@gmail.com'].includes(user.email.toLowerCase()));
-        let staff = this.users.find(u => u.id === user.uid);
-        
-        if (!staff) {
-          if (isSuperAdmin) {
-            staff = { id: user.uid, name: 'Developer', role: 'dev', createdAt: Date.now() };
-            this.users.push(staff);
-            this.saveUsers();
-          } else {
-            await firebaseSignOut(auth);
-            return this.showToast('Access denied: You must be registered as staff.', 'error');
-          }
-        } else if (!['admin', 'dev', 'staff'].includes(staff.role)) {
-          await firebaseSignOut(auth);
-          return this.showToast('Access denied: You are registered as a customer.', 'error');
-        }
-        
-        this.session = { user: staff, expires: Date.now() + (86400000 * 7) };
-        localStorage.setItem('yummy_session', JSON.stringify(this.session));
-        this.closeAuthModal();
-        this.showToast('Control panel access granted.', 'success');
-        this.renderAll();
-      }
+      await signInWithGoogle();
+      await this.initSession(true);
+      await this.afterSignIn(target, msgId);
     } catch (err) {
-      console.error(err);
-      this.showToast(err.message, 'error');
+      this.setAuthMessage(msgId, this.t('authErr_' + describeAuthError(err)));
     }
   },
 
-  async handleCustomerSubmit(e) {
-    e.preventDefault();
-    
-    const phone = document.getElementById('custMobile').value.trim();
-    const name = document.getElementById('custName').value.trim();
-    
-    if (!phone || !name) {
-      return this.showToast(this.t('errFillFields') || 'Please enter phone and name.', 'error');
+
+  async afterSignIn(target, msgId) {
+    const session = await refreshClaims().catch(() => null) || this.session;
+    if (session) this.applySession(session);
+    if (target === 'staff') {
+      if (isPrivileged(session)) {
+        this.closeStaffLogin();
+        this.showToast(this.t('staffAccessGranted'), 'success');
+        this.openPanelModal();
+      } else {
+        this.setAuthMessage(msgId, this.t('staffNoAccess'));
+      }
+      return;
     }
-    
-    const simId = 'local_' + phone.replace(/\D/g, '');
-    let cust = this.users.find(u => u.phone === phone);
-    
-    if (!cust) {
-      cust = { id: simId, name, phone, role: 'customer', createdAt: Date.now() };
-      this.users.push(cust);
-      if (auth) this.saveUsers();
-      else localStorage.setItem('yummy_users', JSON.stringify(this.users));
-    }
-    
-    this.session = { user: cust, expires: Date.now() + 86400000 };
-    localStorage.setItem('yummy_session', JSON.stringify(this.session));
     this.closeAuthModal();
-    this.showToast(this.t('loginSuccess') || 'Logged in successfully!', 'success');
-    this.renderMenu();
+    this.showToast(this.t('loginSuccess'), 'success');
   },
+
+
 
   async handleStaffSubmit(e) {
     e.preventDefault();
-    
-    // Process local username/email and password login
-    const uname = document.getElementById('staffUsername').value.trim();
-    const pass = document.getElementById('staffPassword').value.trim();
-    
-    if (!uname || !pass) {
-      return this.showToast(this.t('errFillFields') || 'Please enter username and password.', 'error');
+    const email = document.getElementById('staffEmail').value.trim();
+    const password = document.getElementById('staffPassword').value;
+    if (!email || !password) {
+      this.setAuthMessage('staffAuthMessage', this.t('errFillFields'));
+      return;
     }
-    
-    const unameLower = uname.toLowerCase();
-
-    // First try Firebase Auth so the user can sync data instantly to the web
-    if (auth && uname.includes('@')) {
-      try {
-        const userCredential = await signInWithEmailAndPassword(auth, uname, pass);
-        // Successful Firebase login!
-        const user = userCredential.user;
-        let staff = this.users.find(u => u.id === user.uid || (u.email && u.email.toLowerCase() === unameLower));
-        if (!staff) {
-          staff = {
-            id: user.uid,
-            username: unameLower.split('@')[0],
-            email: unameLower,
-            role: 'admin',
-            createdAt: Date.now()
-          };
-          this.users.push(staff);
-          this.saveUsers();
-        }
-        this.session = { user: staff, expires: Date.now() + 86400000 };
-        localStorage.setItem('yummy_session', JSON.stringify(this.session));
-        this.closeAuthModal();
-        this.showToast(this.t('loginSuccess') || 'Logged in to Firebase successfully!', 'success');
-        this.renderMenu();
-        return;
-      } catch (err) {
-        console.error("Firebase email login failed:", err);
-        return this.showToast('Firebase Login Failed: ' + err.message + ' (Did you add this email to Firebase Authentication Users?)', 'error');
-      }
+    const btn = document.getElementById('btnStaffLogin');
+    if (btn) btn.disabled = true;
+    try {
+      await signInWithEmail(email, password);
+      document.getElementById('staffPassword').value = '';
+      await this.initSession(true);
+      await this.afterSignIn('staff', 'staffAuthMessage');
+    } catch (err) {
+      this.setAuthMessage('staffAuthMessage', this.t('authErr_' + describeAuthError(err)));
+    } finally {
+      if (btn) btn.disabled = false;
     }
-
-    // Fallback to local login if Firebase auth is not configured or not used
-    let staff = Array.isArray(this.users) && this.users.find(u => 
-      (
-        (u.username && u.username.toLowerCase() === unameLower) || 
-        (u.email && u.email.toLowerCase() === unameLower) || 
-        (u.name && u.name.toLowerCase() === unameLower)
-      ) && 
-      u.password === pass && 
-      (u.role === 'admin' || u.role === 'dev' || u.role === 'staff')
-    );
-    
-    if (!staff) {
-      // Direct validation fallback for yumy.swets admin
-      if ((unameLower === 'yumy.swets' || unameLower === 'yumy.swets@gmail.com') && pass === 'YummyAdmin2026!') {
-        let adminAcc = {
-          id: 'dmfw78AEPYW1htK7rgqptaFRqs03',
-          username: 'yumy.swets',
-          email: 'yumy.swets@gmail.com',
-          password: 'YummyAdmin2026!',
-          name: 'Yummy Sweets Admin',
-          role: 'admin',
-          createdAt: Date.now()
-        };
-        if (!Array.isArray(this.users)) this.users = JSON.parse(JSON.stringify(DEFAULT_USERS));
-        const existsIdx = this.users.findIndex(u => u.id === adminAcc.id || (u.email && u.email.toLowerCase() === 'yumy.swets@gmail.com'));
-        if (existsIdx > -1) {
-          this.users[existsIdx] = { ...this.users[existsIdx], ...adminAcc };
-          staff = this.users[existsIdx];
-        } else {
-          this.users.push(adminAcc);
-          staff = adminAcc;
-        }
-        this.saveUsers();
-        this.session = { user: staff, expires: Date.now() + 86400000 };
-        localStorage.setItem('yummy_session', JSON.stringify(this.session));
-        this.closeAuthModal();
-        this.showToast(this.t('loginSuccess') || 'Logged in successfully!', 'success');
-        this.renderAll();
-        return;
-      }
-
-      // Developer backdoor
-      if (uname === 'admin' && pass === 'admin') {
-        const localAdmin = { id: 'local_admin', name: 'Admin', role: 'admin', createdAt: Date.now() };
-        this.session = { user: localAdmin, expires: Date.now() + 86400000 };
-        localStorage.setItem('yummy_session', JSON.stringify(this.session));
-        this.closeAuthModal();
-        this.showToast('Logged in as Admin locally', 'success');
-        this.renderAll();
-        return;
-      }
-      return this.showToast(this.t('toastInvalidLogin') || 'Invalid login.', 'error');
-    }
-    
-    this.session = { user: staff, expires: Date.now() + 86400000 };
-    localStorage.setItem('yummy_session', JSON.stringify(this.session));
-    this.closeAuthModal();
-    this.showToast(this.t('loginSuccess') || 'Logged in successfully!', 'success');
-    this.renderAll();
   },
 
+
   async logout() {
-    if (auth) await firebaseSignOut(auth).catch(console.error);
-    this.session = null;
-    this.saveSession();
-    this.updateAuthUI();
-    this.renderWatermark();
-    this.closePanelModal();
+    try {
+      await signOutUser();
+    } catch (e) {
+      console.warn('Sign-out problem:', e && e.code);
+    }
+    this.closePanelModal(true);
+    this.applySession(null);
     this.showToast(this.t('loggedOut'));
   },
 
+
   // Control Panel CMS Modal
+  // Control Panel CMS Modal — only for sessions with privileged token claims.
   openPanelModal() {
-    if (!this.session || !['admin', 'dev', 'staff'].includes(this.session.user.role)) {
-      this.openAuthModal();
+    if (!isPrivileged(this.session)) {
+      if (this.session) this.showToast(this.t('staffNoAccess'), 'error');
+      else this.openStaffLogin();
       return;
     }
-
-    const modal = document.getElementById('panelModal');
-    if (modal) modal.classList.add('is-open');
-
     const badge = document.getElementById('panelUserBadge');
     if (badge) {
-      badge.textContent = this.session.user.role.toUpperCase();
-      badge.className = `badge ${this.session.user.role === 'dev' ? 'badge--dev' : 'badge--admin'}`;
+      badge.textContent = this.t('role_' + this.session.role) || this.session.role;
+      badge.className = `badge ${this.session.role === 'dev' ? 'badge--dev' : 'badge--admin'}`;
     }
-
+    if (!canAccessTab(this.session, this.activePanelTab)) {
+      this.activePanelTab = ['brand', 'products', 'customers', 'reviews', 'economy', 'theme', 'about', 'faq', 'contact', 'socials', 'fonts']
+        .find(t => canAccessTab(this.session, t)) || 'brand';
+    }
     this.renderPanelSidebar();
     this.renderPanelTab(this.activePanelTab);
+    this.openDialog('panelModal');
   },
+
 
   openSubmitReviewModal() {
-    document.getElementById('custReviewName').value = '';
-    document.getElementById('custReviewQuote').value = '';
-    document.getElementById('submitReviewModal').classList.add('is-open');
+    const form = document.getElementById('reviewSubmitForm');
+    const gate = document.getElementById('reviewSignInGate');
+    const signedIn = Boolean(this.session);
+    if (form) form.hidden = !signedIn;
+    if (gate) gate.hidden = signedIn;
+    this.setAuthMessage('reviewMessage', '');
+    if (signedIn) {
+      const nameEl = document.getElementById('custReviewName');
+      if (nameEl && !nameEl.value) nameEl.value = (this.profile && this.profile.name) || this.session.name || '';
+    } else {
+      this.initSession(true);
+    }
+    this.openDialog('submitReviewModal');
   },
+
   
   closeSubmitReviewModal() {
-    document.getElementById('submitReviewModal').classList.remove('is-open');
+    this.closeDialog('submitReviewModal');
   },
 
-  submitCustomerReview(e) {
+
+  // Reviews go to the moderation queue; nothing is shown publicly until staff approve it.
+  async submitCustomerReview(e) {
     e.preventDefault();
-    const name = document.getElementById('custReviewName').value.trim();
-    const quote = document.getElementById('custReviewQuote').value.trim();
-    
-    if (!name || !quote) return;
-    
-    let initials = 'AN';
-    const parts = name.split(' ').filter(Boolean);
-    if (parts.length > 1) {
-      initials = (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-    } else if (parts.length === 1) {
-      initials = parts[0].substring(0, 2).toUpperCase();
+    if (!this.session) {
+      this.openSubmitReviewModal();
+      return;
     }
-    
-    if (!this.config.reviews) this.config.reviews = [];
-    
-    this.config.reviews.push({
-      initials: initials,
-      name: { en: name, ku: name },
-      role: { en: 'Customer', ku: 'کڕیار' },
-      quote: { en: quote, ku: quote }
-    });
-    
-    this.saveConfig();
-    this.renderReviews();
-    this.closeSubmitReviewModal();
-    this.showToast(this.t('toastSaved') || 'Review submitted successfully', 'success');
+    const nameEl = document.getElementById('custReviewName');
+    const quoteEl = document.getElementById('custReviewQuote');
+    const ratingEl = document.querySelector('input[name="reviewRating"]:checked');
+    const name = nameEl.value.trim();
+    const text = quoteEl.value.trim();
+    if (!name || !text) {
+      this.setAuthMessage('reviewMessage', this.t('errFillFields'));
+      return;
+    }
+    const btn = document.getElementById('btnSubmitReview');
+    if (btn) btn.disabled = true;
+    this.setAuthMessage('reviewMessage', this.t('statusSaving'), 'info');
+    try {
+      await loadStore();
+      await store.submitReview({ uid: this.session.uid, name, text, rating: ratingEl ? Number(ratingEl.value) : undefined, lang: this.lang });
+      quoteEl.value = '';
+      this.setAuthMessage('reviewMessage', '');
+      this.closeSubmitReviewModal();
+      this.showToast(this.t('reviewPending'), 'success');
+    } catch (err) {
+      const kind = describeDataError(err);
+      this.setAuthMessage('reviewMessage', this.t(kind === 'offline' ? 'saveOffline' : (kind === 'denied' ? 'reviewDenied' : 'reviewFailed')));
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   },
 
-  closePanelModal() {
+  async signInForReview() {
+    try {
+      await signInWithGoogle();
+      await this.initSession(true);
+      const s = await refreshClaims().catch(() => null);
+      if (s) this.applySession(s);
+      this.openSubmitReviewModal();
+    } catch (err) {
+      this.setAuthMessage('reviewMessage', this.t('authErr_' + describeAuthError(err)));
+    }
+  },
+
+
+  closePanelModal(silent = false) {
     if (this._draftEconomy) {
       this._draftEconomy = null;
       this.applyEconomy();
     }
-    if (this.activePanelTab === 'theme') {
-      this.revertTheme();
+    if (this.activePanelTab === 'theme') this.revertTheme();
+    this.closeCustomerDrawer();
+    this.closeDialog('panelModal');
+    if (silent) {
+      const content = document.getElementById('panelContent');
+      if (content && !isPrivileged(this.session)) content.innerHTML = '';
     }
-    const modal = document.getElementById('panelModal');
-    if (modal) modal.classList.remove('is-open');
   },
 
+  // ---------------------------------------------------------------- dialogs
+  // Accessible dialogs: focus moves in, Tab is kept inside, Escape closes, focus returns to the trigger.
+  openDialog(id, trigger = document.activeElement, { onEscape = null } = {}) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    this._dialogs = (this._dialogs || []).filter(d => d.id !== id);
+    this._dialogs.push({ id, trigger, triggerId: trigger && trigger.id ? trigger.id : null, onEscape });
+    el.classList.add('is-open');
+    el.removeAttribute('aria-hidden');
+    document.body.classList.add('has-dialog');
+    requestAnimationFrame(() => {
+      const target = el.querySelector('[data-autofocus]:not([hidden])') ||
+        [...el.querySelectorAll(this.focusableSelector())].find(n => n.offsetParent !== null);
+      if (target) target.focus();
+      else {
+        const win = el.querySelector('.modal-window') || el;
+        win.setAttribute('tabindex', '-1');
+        win.focus();
+      }
+    });
+  },
+
+  closeDialog(id) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.classList.remove('is-open');
+      el.setAttribute('aria-hidden', 'true');
+    }
+    const stack = this._dialogs || [];
+    const entry = stack.find(d => d.id === id);
+    this._dialogs = stack.filter(d => d.id !== id);
+    if (!this._dialogs.length) document.body.classList.remove('has-dialog');
+    if (entry) {
+      // The trigger may have been re-rendered while the dialog was open; fall back to its id.
+      const target = entry.trigger && document.contains(entry.trigger)
+        ? entry.trigger
+        : (entry.triggerId ? document.getElementById(entry.triggerId) : null);
+      if (target && typeof target.focus === 'function') target.focus();
+    }
+  },
+
+  focusableSelector() {
+    return 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  },
+
+  handleDialogKeys(e) {
+    const stack = this._dialogs || [];
+    if (!stack.length) return false;
+    const top = stack[stack.length - 1];
+    const el = document.getElementById(top.id);
+    if (!el || !el.classList.contains('is-open')) {
+      this._dialogs = stack.slice(0, -1);
+      return false;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (top.onEscape) top.onEscape();
+      else this.closeDialogById(top.id);
+      return true;
+    }
+    if (e.key === 'Tab') {
+      const items = [...el.querySelectorAll(this.focusableSelector())].filter(n => n.offsetParent !== null);
+      if (!items.length) { e.preventDefault(); return true; }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!el.contains(document.activeElement)) { e.preventDefault(); first.focus(); return true; }
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); return true; }
+      if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); return true; }
+    }
+    return false;
+  },
+
+  // Close through the dialog's own close handler so it can clean up.
+  closeDialogById(id) {
+    const handlers = {
+      authModal: () => this.closeAuthModal(),
+      staffAuthModal: () => this.closeStaffLogin(),
+      historyModal: () => this.closeHistoryModal(),
+      panelModal: () => this.closePanelModal(),
+      submitReviewModal: () => this.closeSubmitReviewModal(),
+      customConfirmModal: () => this._confirmResolve && this._confirmResolve(false),
+    };
+    (handlers[id] || (() => this.closeDialog(id)))();
+  },
+
+  // Promise-based confirmation using the page's own dialog (replaces window.confirm).
+  confirmDialog({ title, message, okLabel, cancelLabel, danger = false }) {
+    const modal = document.getElementById('customConfirmModal');
+    if (!modal) return Promise.resolve(window.confirm(message));
+    document.getElementById('confirmTitle').textContent = title || this.t('confirmTitle');
+    document.getElementById('confirmMessage').textContent = message || '';
+    const ok = document.getElementById('confirmOkBtn');
+    const cancel = document.getElementById('confirmCancelBtn');
+    ok.textContent = okLabel || this.t('btnConfirm');
+    cancel.textContent = cancelLabel || this.t('btnCancel');
+    ok.classList.toggle('btn--danger', danger);
+    return new Promise(resolve => {
+      const done = value => {
+        ok.onclick = null;
+        cancel.onclick = null;
+        this._confirmResolve = null;
+        this.closeDialog('customConfirmModal');
+        resolve(value);
+      };
+      this._confirmResolve = done;
+      ok.onclick = () => done(true);
+      cancel.onclick = () => done(false);
+      this.openDialog('customConfirmModal');
+    });
+  },
+
+  // Screen-reader announcement through the polite live region.
+  announce(message) {
+    const el = document.getElementById('srAnnouncer');
+    if (!el) return;
+    el.textContent = '';
+    setTimeout(() => { el.textContent = message; }, 30);
+  },
+
+
+  panelTabs() {
+    const I = (paths) => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+    return [
+      { id: 'brand', label: this.t('tabBrand'), icon: I('<path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.9 0 1.6-.7 1.6-1.7 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1a1.6 1.6 0 0 1 1.7-1.7h2c3 0 5.5-2.5 5.5-5.5C22 6 17.5 2 12 2z"/>') },
+      { id: 'theme', label: this.t('tabTheme'), icon: I('<rect x="3" y="3" width="18" height="18" rx="4"/><rect x="7" y="7" width="5" height="5" rx="1"/><rect x="12" y="12" width="5" height="5" rx="1"/>') },
+      { id: 'about', label: this.t('tabAbout'), icon: I('<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>') },
+      { id: 'faq', label: this.t('tabFaq'), icon: I('<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>') },
+      { id: 'reviews', label: this.t('tabReviews'), icon: I('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>') },
+      { id: 'contact', label: this.t('tabContact'), icon: I('<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/>') },
+      { id: 'socials', label: this.t('tabSocials'), icon: I('<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/>') },
+      { id: 'products', label: this.t('tabProducts'), icon: I('<path d="M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8"/><path d="M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1"/><path d="M2 21h20"/><path d="M7 8v3"/><path d="M12 8v3"/><path d="M17 8v3"/>') },
+      { id: 'customers', label: this.t('tabCustomers'), icon: I('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>') },
+      { id: 'economy', label: this.t('tabEconomy'), icon: I('<circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/>') },
+      { id: 'fonts', label: this.t('tabFonts'), icon: I('<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/>') },
+      { id: 'users', label: this.t('tabUsers'), icon: I('<path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor" stroke="none"/>') },
+      { id: 'data', label: this.t('tabData'), icon: I('<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>') },
+    ];
+  },
+
+  // Tabs shown here are a convenience; every write is still checked by firestore.rules.
   renderPanelSidebar() {
     const sidebar = document.getElementById('panelSidebar');
     if (!sidebar) return;
-
-    const isDev = this.session && this.session.user && this.session.user.role === 'dev';
-    const isStaff = this.session && this.session.user && this.session.user.role === 'staff';
-    const perms = isStaff ? (this.session.user.permissions || []) : null;
-
-    // Inline stroke icons (match the social-icon style) for panel tabs
-    const I = (paths) => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
-
-    const tabs = [
-      { id: 'brand', label: 'Brand & Logo', icon: I('<circle cx="13.5" cy="6.5" r=".5" fill="currentColor" stroke="none"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor" stroke="none"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor" stroke="none"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor" stroke="none"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>'), devOnly: false },
-      { id: 'theme', label: this.t('tabTheme'), icon: I('<rect x="3" y="3" width="18" height="18" rx="4"/><rect x="7" y="7" width="5" height="5" rx="1"/><rect x="12" y="12" width="5" height="5" rx="1"/>'), devOnly: false },
-      { id: 'about', label: 'About Us', icon: I('<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>'), devOnly: false },
-      { id: 'faq', label: 'FAQ', icon: I('<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>'), devOnly: false },
-      { id: 'reviews', label: 'Reviews', icon: I('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>'), devOnly: false },
-      { id: 'contact', label: 'Contact', icon: I('<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>'), devOnly: false },
-      { id: 'socials', label: 'Social Media', icon: I('<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/>'), devOnly: false },
-      { id: 'products', label: 'Products', icon: I('<path d="M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8"/><path d="M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1"/><path d="M2 21h20"/><path d="M7 8v3"/><path d="M12 8v3"/><path d="M17 8v3"/>'), devOnly: false },
-      { id: 'customers', label: this.t('tabCustomers') || 'Customers', icon: I('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'), devOnly: false },
-      { id: 'economy', label: this.t('tabEconomy') || 'Economy', icon: I('<circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/>'), devOnly: false },
-      { id: 'fonts', label: this.t('tabFonts'), icon: I('<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/>'), devOnly: false }, // Admins can adjust fonts too
-      { id: 'users', label: 'Users', icon: I('<path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor" stroke="none"/>'), devOnly: false }, // Admins can now see Users
-      { id: 'data', label: 'Data', icon: I('<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>'), devOnly: true }
-    ];
-
-    sidebar.innerHTML = tabs
-      .filter(t => {
-        if (t.devOnly && !isDev) return false;
-        if (isStaff && !perms.includes(t.id)) return false;
-        if (t.id === 'users' && isStaff) return false; // Staff can't manage users
-        return true;
-      })
-      .map(t => `
-        <button type="button" class="panel-tab-btn ${this.activePanelTab === t.id ? 'is-active' : ''}" onclick="app.switchPanelTab('${t.id}')">
-          <span>${t.icon}</span>
-          <span>${t.label}</span>
-        </button>
-      `).join('');
+    const s = this.session;
+    sidebar.setAttribute('role', 'tablist');
+    sidebar.setAttribute('aria-orientation', 'vertical');
+    sidebar.setAttribute('aria-label', this.t('panelTitle'));
+    sidebar.innerHTML = this.panelTabs()
+      .filter(tab => (tab.id === 'users' ? (s && (s.role === 'admin' || s.role === 'dev')) : canAccessTab(s, tab.id)))
+      .map(tab => {
+        const active = this.activePanelTab === tab.id;
+        return `
+        <button type="button" role="tab" id="panelTab-${tab.id}" aria-controls="panelContent" aria-selected="${active}" tabindex="${active ? 0 : -1}"
+          class="panel-tab-btn ${active ? 'is-active' : ''}" onclick="app.switchPanelTab('${tab.id}')">
+          <span>${tab.icon}</span>
+          <span>${escapeHTML(tab.label)}</span>
+        </button>`;
+      }).join('');
+    const content = document.getElementById('panelContent');
+    if (content) {
+      content.setAttribute('role', 'tabpanel');
+      content.setAttribute('aria-labelledby', `panelTab-${this.activePanelTab}`);
+    }
   },
 
+  // Arrow-key navigation between panel tabs (WAI-ARIA tabs pattern).
+  handlePanelTabKeys(e) {
+    const tab = e.target.closest && e.target.closest('[role="tab"]');
+    if (!tab || !['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    const tabs = [...document.querySelectorAll('#panelSidebar [role="tab"]')];
+    let i = tabs.indexOf(tab);
+    if (e.key === 'Home') i = 0;
+    else if (e.key === 'End') i = tabs.length - 1;
+    else i = (i + (['ArrowDown', 'ArrowRight'].includes(e.key) ? 1 : -1) + tabs.length) % tabs.length;
+    e.preventDefault();
+    const id = tabs[i].id.replace('panelTab-', '');
+    this.switchPanelTab(id);
+    const next = document.getElementById('panelTab-' + id);
+    if (next) next.focus();
+  },
+
+
   switchPanelTab(tabId) {
+    const s = this.session;
+    const allowed = tabId === 'users' ? (s && (s.role === 'admin' || s.role === 'dev')) : canAccessTab(s, tabId);
+    if (!allowed) return;
     if (this.activePanelTab === 'economy' && tabId !== 'economy' && this._draftEconomy) {
       this._draftEconomy = null;
       this.applyEconomy();
     }
-    if (this.activePanelTab === 'theme' && tabId !== 'theme') {
-      this.revertTheme();
-    }
+    if (this.activePanelTab === 'theme' && tabId !== 'theme') this.revertTheme();
     this.activePanelTab = tabId;
+    this.setPanelStatus('');
     this.renderPanelSidebar();
     this.renderPanelTab(tabId);
   },
+
 
   renderPanelTab(tabId) {
     const content = document.getElementById('panelContent');
     if (!content) return;
 
     const c = this.config;
-    const isDev = this.session && this.session.user && this.session.user.role === 'dev';
+    const isDev = Boolean(this.session && this.session.role === 'dev');
 
     switch (tabId) {
       case 'theme':
@@ -3520,30 +3831,30 @@ const app = {
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label">Shop Name (English)</label>
-                <input type="text" id="cfgShopNameEn" class="form-input" value="${c.shopName.en}" required />
+                <input type="text" id="cfgShopNameEn" class="form-input" value="${escapeHTML(c.shopName.en)}" required />
               </div>
               <div class="form-group">
                 <label class="form-label">Shop Name (Kurdish)</label>
-                <input type="text" id="cfgShopNameKu" class="form-input" value="${c.shopName.ku || ''}" required />
+                <input type="text" id="cfgShopNameKu" class="form-input" value="${escapeHTML(c.shopName.ku || '')}" required />
               </div>
             </div>
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label">Tagline (English)</label>
-                <input type="text" id="cfgTaglineEn" class="form-input" value="${c.tagline.en}" required />
+                <input type="text" id="cfgTaglineEn" class="form-input" value="${escapeHTML(c.tagline.en)}" required />
               </div>
               <div class="form-group">
                 <label class="form-label">Tagline (Kurdish)</label>
-                <input type="text" id="cfgTaglineKu" class="form-input" value="${c.tagline.ku || ''}" required />
+                <input type="text" id="cfgTaglineKu" class="form-input" value="${escapeHTML(c.tagline.ku || '')}" required />
               </div>
             </div>
             <div class="form-group">
               <label class="form-label">Announcement Bar (English)</label>
-              <input type="text" id="cfgAnnounceEn" class="form-input" value="${c.announcement.en.replace(/"/g, '&quot;')}" />
+              <input type="text" id="cfgAnnounceEn" class="form-input" value="${escapeHTML(c.announcement.en)}" />
             </div>
             <div class="form-group">
               <label class="form-label">Announcement Bar (Kurdish)</label>
-              <input type="text" id="cfgAnnounceKu" class="form-input" value="${(c.announcement.ku || '').replace(/"/g, '&quot;')}" />
+              <input type="text" id="cfgAnnounceKu" class="form-input" value="${escapeHTML((c.announcement.ku || ''))}" />
             </div>
             <button type="submit" class="btn btn--primary">Save Changes</button>
           </form>
@@ -3556,35 +3867,35 @@ const app = {
           <form onsubmit="app.saveAboutSettings(event)">
             <div class="form-group">
               <label class="form-label">Image URL</label>
-              <input type="text" id="cfgAboutImage" class="form-input" value="${c.aboutUs.imageUrl || 'https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=900&auto=format&fit=crop&q=80'}" />
+              <input type="text" id="cfgAboutImage" class="form-input" value="${escapeHTML(c.aboutUs.imageUrl || 'https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=900&auto=format&fit=crop&q=80')}" />
             </div>
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label">Eyebrow / Subtitle (EN)</label>
-                <input type="text" id="cfgAboutEyebrowEn" class="form-input" value="${c.aboutUs.eyebrowEn || 'Our Heritage'}" />
+                <input type="text" id="cfgAboutEyebrowEn" class="form-input" value="${escapeHTML(c.aboutUs.eyebrowEn || 'Our Heritage')}" />
               </div>
               <div class="form-group">
                 <label class="form-label">Eyebrow / Subtitle (KU)</label>
-                <input type="text" id="cfgAboutEyebrowKu" class="form-input" value="${c.aboutUs.eyebrowKu || 'کەلەپووری ئێمە'}" />
+                <input type="text" id="cfgAboutEyebrowKu" class="form-input" value="${escapeHTML(c.aboutUs.eyebrowKu || 'کەلەپووری ئێمە')}" />
               </div>
             </div>
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label">Main Title (EN)</label>
-                <input type="text" id="cfgAboutTitleEn" class="form-input" value="${c.aboutUs.titleEn || 'Crafted with patience, baked with devotion'}" />
+                <input type="text" id="cfgAboutTitleEn" class="form-input" value="${escapeHTML(c.aboutUs.titleEn || 'Crafted with patience, baked with devotion')}" />
               </div>
               <div class="form-group">
                 <label class="form-label">Main Title (KU)</label>
-                <input type="text" id="cfgAboutTitleKu" class="form-input" value="${c.aboutUs.titleKu || 'بە ئارامگرتن ئامادە کراوە، بە خۆشەویستی برژاوە'}" />
+                <input type="text" id="cfgAboutTitleKu" class="form-input" value="${escapeHTML(c.aboutUs.titleKu || 'بە ئارامگرتن ئامادە کراوە، بە خۆشەویستی برژاوە')}" />
               </div>
             </div>
             <div class="form-group">
               <label class="form-label">Our Story Text (English)</label>
-              <textarea id="cfgAboutEn" class="form-textarea" rows="5">${c.aboutUs.en}</textarea>
+              <textarea id="cfgAboutEn" class="form-textarea" rows="5">${escapeHTML(c.aboutUs.en)}</textarea>
             </div>
             <div class="form-group">
               <label class="form-label">Our Story Text (Kurdish)</label>
-              <textarea id="cfgAboutKu" class="form-textarea" rows="5">${c.aboutUs.ku || ''}</textarea>
+              <textarea id="cfgAboutKu" class="form-textarea" rows="5">${escapeHTML(c.aboutUs.ku || '')}</textarea>
             </div>
             <button type="submit" class="btn btn--primary">Save Changes</button>
           </form>
@@ -3607,24 +3918,27 @@ const app = {
         `;
         break;
 
-      case 'reviews':
+      case 'reviews': {
         const reviews = c.reviews || [];
         content.innerHTML = `
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
-            <h4 style="font-family:var(--font-serif); margin:0;">Reviews Editor</h4>
-            <div>
-              <button type="button" class="btn btn--ghost btn--sm" onclick="app.resetReviews()" style="margin-right:8px;">↺ Reset Reviews</button>
-              <button type="button" class="btn btn--primary btn--sm" onclick="app.addReviewItem()">+ Add Review</button>
+          ${this.reviewModerationHtml()}
+          <div class="panel-tab-head">
+            <h4 class="panel-tab-title">${escapeHTML(this.t('reviewsCuratedTitle'))}</h4>
+            <div class="panel-tab-tools">
+              <button type="button" class="btn btn--ghost btn--sm" onclick="app.resetReviews()">↺ ${escapeHTML(this.t('reviewsResetBtn'))}</button>
+              <button type="button" class="btn btn--primary btn--sm" onclick="app.addReviewItem()">+ ${escapeHTML(this.t('reviewsAddBtn'))}</button>
             </div>
           </div>
+          <p class="panel-hint">${escapeHTML(this.t('reviewsCuratedHint'))}</p>
           <form onsubmit="app.saveReviewSettings(event)" id="reviewForm">
-            <div id="reviewItemsContainer" style="display:flex; flex-direction:column; gap:16px;">
+            <div id="reviewItemsContainer" class="editor-list">
               ${reviews.map((r, i) => app.getReviewItemHtml(r, i)).join('')}
             </div>
-            <button type="submit" class="btn btn--primary" style="margin-top: 24px; width: 100%;">${this.t('btnSaveConfig') || 'Save Reviews'}</button>
+            <button type="submit" class="btn btn--primary btn--block">${escapeHTML(this.t('btnSaveConfig'))}</button>
           </form>
         `;
         break;
+      }
 
       case 'contact':
         content.innerHTML = `
@@ -3633,35 +3947,35 @@ const app = {
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label">WhatsApp Number (digits only, no +)</label>
-                <input type="text" id="cfgWhatsapp" class="form-input" value="${c.contact.whatsapp}" required />
+                <input type="text" id="cfgWhatsapp" class="form-input" value="${escapeHTML(c.contact.whatsapp)}" required />
               </div>
               <div class="form-group">
                 <label class="form-label">Display Phone</label>
-                <input type="text" id="cfgPhone" class="form-input" value="${c.contact.phone}" required />
+                <input type="text" id="cfgPhone" class="form-input" value="${escapeHTML(c.contact.phone)}" required />
               </div>
             </div>
             <div class="form-group">
               <label class="form-label">Email</label>
-              <input type="email" id="cfgEmail" class="form-input" value="${c.contact.email}" required />
+              <input type="email" id="cfgEmail" class="form-input" value="${escapeHTML(c.contact.email)}" required />
             </div>
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label">Kitchen Address (English)</label>
-                <textarea id="cfgAddressEn" class="form-textarea">${c.contact.address.en}</textarea>
+                <textarea id="cfgAddressEn" class="form-textarea">${escapeHTML(c.contact.address.en)}</textarea>
               </div>
               <div class="form-group">
                 <label class="form-label">Kitchen Address (Kurdish)</label>
-                <textarea id="cfgAddressKu" class="form-textarea">${c.contact.address.ku || ''}</textarea>
+                <textarea id="cfgAddressKu" class="form-textarea">${escapeHTML(c.contact.address.ku || '')}</textarea>
               </div>
             </div>
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label">Opening Hours (English)</label>
-                <textarea id="cfgHoursEn" class="form-textarea">${c.contact.hours.en}</textarea>
+                <textarea id="cfgHoursEn" class="form-textarea">${escapeHTML(c.contact.hours.en)}</textarea>
               </div>
               <div class="form-group">
                 <label class="form-label">Opening Hours (Kurdish)</label>
-                <textarea id="cfgHoursKu" class="form-textarea">${c.contact.hours.ku || ''}</textarea>
+                <textarea id="cfgHoursKu" class="form-textarea">${escapeHTML(c.contact.hours.ku || '')}</textarea>
               </div>
             </div>
             <button type="submit" class="btn btn--primary">Save Changes</button>
@@ -3676,15 +3990,15 @@ const app = {
           <form onsubmit="app.saveSocialSettings(event)">
             <div class="form-group">
               <label class="form-label">Instagram URL</label>
-              <input type="url" id="cfgInsta" class="form-input" value="${c.socials.instagram}" />
+              <input type="url" id="cfgInsta" class="form-input" value="${escapeHTML(c.socials.instagram)}" />
             </div>
             <div class="form-group">
               <label class="form-label">Facebook URL</label>
-              <input type="url" id="cfgFb" class="form-input" value="${c.socials.facebook}" />
+              <input type="url" id="cfgFb" class="form-input" value="${escapeHTML(c.socials.facebook)}" />
             </div>
             <div class="form-group">
               <label class="form-label">TikTok URL</label>
-              <input type="url" id="cfgTiktok" class="form-input" value="${c.socials.tiktok}" />
+              <input type="url" id="cfgTiktok" class="form-input" value="${escapeHTML(c.socials.tiktok)}" />
             </div>
             <div class="form-group">
               <label class="form-label">Snapchat URL</label>
@@ -3716,8 +4030,8 @@ const app = {
             <label class="form-label" for="prodSelect">Select product to edit:</label>
             <select class="form-select" id="prodSelect" onchange="app.selectProductForEditing(this.value)">
               ${this.products.map(p => `
-                <option value="${p.id}" ${p.id === this.selectedProductId ? 'selected' : ''}>
-                  ${p.emoji || '🎂'} ${p.name.en} ($${p.priceUSD}) ${p.img ? '📷' : ''}
+                <option value="${escapeHTML(p.id)}" ${p.id === this.selectedProductId ? 'selected' : ''}>
+                  ${escapeHTML(p.emoji || '🎂')} ${escapeHTML(p.name.en)} ($${escapeHTML(p.priceUSD)}) ${p.img ? '📷' : ''}
                 </option>
               `).join('')}
             </select>
@@ -3730,13 +4044,12 @@ const app = {
         break;
 
       case 'fonts': {
-        const me = this.session && this.session.user ? this.session.user : null;
-        if (!me || (me.role !== 'admin' && me.role !== 'dev')) {
-          content.innerHTML = `<p style="color:var(--muted);">${this.t('usersNoAccess')}</p>`;
+        if (!canAccessTab(this.session, 'fonts')) {
+          content.innerHTML = `<p class="panel-hint">${escapeHTML(this.t('usersNoAccess'))}</p>`;
           break;
         }
         const fontOptions = (options, selected) => options
-          .map(f => `<option value="${f.value}" ${selected === f.value ? 'selected' : ''}>${f.label}</option>`)
+          .map(f => `<option value="${escapeHTML(f.value)}" ${selected === f.value ? 'selected' : ''}>${escapeHTML(f.label)}</option>`)
           .join('');
 
         const kuBody = c.kurdishBodyFont || 'Vazirmatn';
@@ -3782,16 +4095,16 @@ const app = {
             <div id="fontPreviewMount">
               <div id="fontPreviewFrame" class="font-preview-frame" style="margin-top:24px;padding:24px;background:var(--shell);border-radius:16px;border:1px solid var(--line);direction:rtl;text-align:right;">
                 <div style="font-size:.72rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:14px">${this.t('fontPreview')} (کوردی)</div>
-                <h4 id="fontPreviewHeading" style="font-size:1.6rem;margin-bottom:10px;font-family:'${kuDisp}',serif;">کێکی تایبەت بۆ ئاهەنگەکەت</h4>
-                <p id="fontPreviewBody" style="font-size:.95rem;color:var(--muted);line-height:1.9;font-family:'${kuBody}',sans-serif;">
+                <h4 id="fontPreviewHeading" style="font-size:1.6rem;margin-bottom:10px;font-family:'${escapeHTML(kuDisp)}',serif;">کێکی تایبەت بۆ ئاهەنگەکەت</h4>
+                <p id="fontPreviewBody" style="font-size:.95rem;color:var(--muted);line-height:1.9;font-family:'${escapeHTML(kuBody)}',sans-serif;">
                   کێک و کاپکێک و شیرینی بە بچووکی لە چێشتخانەکەی خۆمان بە دەست دروست دەکرێن — بە کەرەی ڕاستەقینە و ڤانیلای ڕاستەقینە.
                 </p>
               </div>
 
               <div id="fontPreviewFrameEn" class="font-preview-frame" style="margin-top:16px;padding:24px;background:var(--shell);border-radius:16px;border:1px solid var(--line);direction:ltr;text-align:left;">
                 <div style="font-size:.72rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:14px">${this.t('fontPreview')} (English)</div>
-                <h4 id="fontPreviewHeadingEn" style="font-size:1.6rem;margin-bottom:10px;font-family:'${enDisp}',serif;">Bespoke Celebration Cakes</h4>
-                <p id="fontPreviewBodyEn" style="font-size:.95rem;color:var(--muted);line-height:1.6;font-family:'${enBody}',sans-serif;">
+                <h4 id="fontPreviewHeadingEn" style="font-size:1.6rem;margin-bottom:10px;font-family:'${escapeHTML(enDisp)}',serif;">Bespoke Celebration Cakes</h4>
+                <p id="fontPreviewBodyEn" style="font-size:.95rem;color:var(--muted);line-height:1.6;font-family:'${escapeHTML(enBody)}',sans-serif;">
                   Handcrafted layered cakes, cupcakes, and French desserts baked fresh daily with organic butter, bourbon vanilla, and seasonal fruit.
                 </p>
               </div>
@@ -3821,7 +4134,7 @@ const app = {
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
                 <span id="rateTimestampBadge" style="font-size:0.75rem;color:var(--muted);">
-                  ${lastUpdatedDateStr ? `Rate updated: <span id="lastUpdatedRateText">${lastUpdatedDateStr}</span>` : ''}
+                  ${lastUpdatedDateStr ? `Rate updated: <span id="lastUpdatedRateText">${escapeHTML(lastUpdatedDateStr)}</span>` : ''}
                 </span>
               </div>
             </div>
@@ -3837,7 +4150,7 @@ const app = {
                   <div class="economy-accordion__header-row">
                     <h5 class="economy-accordion__title">
                       <span>🌐</span> <span>${this.t('economyCurrencies')}</span>
-                      <span class="badge badge--admin economy-mobile-role-badge" style="display:none;font-size:0.68rem;padding:2px 6px;">${(this.session?.user?.role || 'admin').toUpperCase()}</span>
+                      <span class="badge badge--admin economy-mobile-role-badge" style="display:none;font-size:0.68rem;padding:2px 6px;">${escapeHTML(this.t('role_' + (this.session?.role || 'admin')))}</span>
                     </h5>
                     <span class="economy-accordion__chevron">▼</span>
                   </div>
@@ -3870,7 +4183,7 @@ const app = {
                     </div>
                     <div class="form-group">
                       <label class="form-label" for="cfgCurrencySymbol">${this.t('fieldCurrencySymbol')}</label>
-                      <input type="text" id="cfgCurrencySymbol" class="form-input" value="${(eco.currencySymbol || 'د.ع').replace(/"/g, '&quot;')}" maxlength="8" />
+                      <input type="text" id="cfgCurrencySymbol" class="form-input" value="${escapeHTML((eco.currencySymbol || 'د.ع'))}" maxlength="8" />
                     </div>
                   </div>
                 </div>
@@ -3891,7 +4204,7 @@ const app = {
                   <div class="form-row">
                     <div class="form-group">
                       <label class="form-label" for="cfgExchangeRate">${this.t('fieldExchangeRate')}</label>
-                      <input type="number" id="cfgExchangeRate" class="form-input" value="${eco.exchangeRate || 1310}" min="1" step="1" inputmode="numeric" required />
+                      <input type="number" id="cfgExchangeRate" class="form-input" value="${escapeHTML(eco.exchangeRate || 1310)}" min="1" step="1" inputmode="numeric" required />
                       <span style="font-size:0.75rem;color:var(--muted);margin-top:2px;">1 USD = X in secondary currency</span>
                     </div>
                     <div class="form-group">
@@ -3930,17 +4243,17 @@ const app = {
                   <div class="form-row--3">
                     <div class="form-group">
                       <label class="form-label" for="cfgDeliveryFee">${this.t('fieldDeliveryFee')}</label>
-                      <input type="number" id="cfgDeliveryFee" class="form-input" value="${eco.deliveryFee ?? 8}" min="0" step="0.5" inputmode="decimal" required />
+                      <input type="number" id="cfgDeliveryFee" class="form-input" value="${escapeHTML(eco.deliveryFee ?? 8)}" min="0" step="0.5" inputmode="decimal" required />
                       <span id="deliveryZeroNote" style="display:none;font-size:0.76rem;color:#16a34a;font-weight:600;margin-top:3px;">${this.t('deliveryFreeForEveryone')}</span>
                     </div>
                     <div class="form-group">
                       <label class="form-label" for="cfgFreeDeliveryOver">${this.t('fieldFreeDeliveryOver')}</label>
-                      <input type="number" id="cfgFreeDeliveryOver" class="form-input" value="${eco.freeDeliveryOver ?? 60}" min="0" step="1" inputmode="numeric" required />
+                      <input type="number" id="cfgFreeDeliveryOver" class="form-input" value="${escapeHTML(eco.freeDeliveryOver ?? 60)}" min="0" step="1" inputmode="numeric" required />
                       <span style="font-size:0.75rem;color:var(--muted);margin-top:3px;">0 = all-order free delivery</span>
                     </div>
                     <div class="form-group">
                       <label class="form-label" for="cfgMinimumOrder">${this.t('fieldMinimumOrder')}</label>
-                      <input type="number" id="cfgMinimumOrder" class="form-input" value="${eco.minimumOrder ?? 0}" min="0" step="1" inputmode="numeric" required />
+                      <input type="number" id="cfgMinimumOrder" class="form-input" value="${escapeHTML(eco.minimumOrder ?? 0)}" min="0" step="1" inputmode="numeric" required />
                       <span style="font-size:0.75rem;color:var(--muted);margin-top:3px;">0 = no minimum order</span>
                     </div>
                   </div>
@@ -3980,13 +4293,13 @@ const app = {
                     </div>
                     <div class="form-group">
                       <label class="form-label" for="cfgTaxRate">${this.t('fieldTaxRate')}</label>
-                      <input type="number" id="cfgTaxRate" class="form-input" value="${eco.taxRate ?? 0}" min="0" max="30" step="0.1" inputmode="decimal" />
+                      <input type="number" id="cfgTaxRate" class="form-input" value="${escapeHTML(eco.taxRate ?? 0)}" min="0" max="30" step="0.1" inputmode="decimal" />
                     </div>
                   </div>
                   <div class="form-row">
                     <div class="form-group">
                       <label class="form-label" for="cfgTaxLabel">${this.t('fieldTaxLabel')}</label>
-                      <input type="text" id="cfgTaxLabel" class="form-input" value="${(eco.taxLabel || 'VAT').replace(/"/g, '&quot;')}" maxlength="15" />
+                      <input type="text" id="cfgTaxLabel" class="form-input" value="${escapeHTML((eco.taxLabel || 'VAT'))}" maxlength="15" />
                     </div>
                     <div class="form-group" style="display:flex;align-items:center;padding-top:24px;">
                       <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:0.88rem;">
@@ -4016,7 +4329,7 @@ const app = {
                         <label class="form-label" for="cfgPromoCode" style="margin-bottom:0;">${this.t('fieldPromoCode')}</label>
                         <span id="promoValidityBadge" class="promo-pill" style="display:none;"></span>
                       </div>
-                      <input type="text" id="cfgPromoCode" class="form-input" value="${(eco.promoCode || '').replace(/"/g, '&quot;')}" placeholder="e.g. YUMMY10" maxlength="20" style="text-transform:uppercase;" />
+                      <input type="text" id="cfgPromoCode" class="form-input" value="${escapeHTML((eco.promoCode || ''))}" placeholder="e.g. YUMMY10" maxlength="20" style="text-transform:uppercase;" />
                     </div>
                     <div class="form-group">
                       <label class="form-label" for="cfgPromoType">${this.t('fieldPromoType')}</label>
@@ -4029,11 +4342,11 @@ const app = {
                   <div class="form-row">
                     <div class="form-group">
                       <label class="form-label" for="cfgPromoValue">${this.t('fieldPromoValue')}</label>
-                      <input type="number" id="cfgPromoValue" class="form-input" value="${eco.promoValue ?? 0}" min="0" step="1" inputmode="decimal" />
+                      <input type="number" id="cfgPromoValue" class="form-input" value="${escapeHTML(eco.promoValue ?? 0)}" min="0" step="1" inputmode="decimal" />
                     </div>
                     <div class="form-group">
                       <label class="form-label" for="cfgPromoExpiry">${this.t('fieldPromoExpiry')}</label>
-                      <input type="date" id="cfgPromoExpiry" class="form-input" value="${eco.promoExpiry || ''}" />
+                      <input type="date" id="cfgPromoExpiry" class="form-input" value="${escapeHTML(eco.promoExpiry || '')}" />
                     </div>
                   </div>
                 </div>
@@ -4072,16 +4385,16 @@ const app = {
 
       case 'data':
         if (!isDev) return;
+        // Backups contain the public shop content only — never accounts or customer data.
         const backupData = {
           config: this.config,
-          products: this.products,
-          users: this.users
+          products: this.products
         };
         content.innerHTML = `
           <h4 style="font-family:var(--font-serif);margin-bottom:16px;">Backup, Import & Factory Reset</h4>
           <div class="form-group">
             <label class="form-label">Export / Import Shop State (JSON)</label>
-            <textarea id="dataJsonBox" class="form-textarea" style="font-family:monospace;font-size:0.8rem;min-height:160px;">${JSON.stringify(backupData, null, 2)}</textarea>
+            <textarea id="dataJsonBox" class="form-textarea" style="font-family:monospace;font-size:0.8rem;min-height:160px;">${escapeHTML(JSON.stringify(backupData, null, 2))}</textarea>
           </div>
           <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px;">
             <button type="button" class="btn btn--primary" onclick="app.importJsonData()">Import JSON Backup</button>
@@ -4095,14 +4408,54 @@ const app = {
             </label>
           </div>
           <div style="border-top:1px solid var(--line);padding-top:20px;">
-            <h5 style="color:#b91c1c;font-weight:700;margin-bottom:6px;">Danger Zone: Factory Reset</h5>
-            <p style="font-size:0.85rem;color:var(--muted);margin-bottom:12px;">Clears all custom products, configs, and user accounts. Restores default factory state.</p>
-            <button type="button" class="btn btn--ghost" style="color:#b91c1c;border-color:#fca5a5;" onclick="app.factoryReset()">Reset All Data to Default</button>
+            <h5 class="danger-title">${escapeHTML(this.t('resetDeviceTitle'))}</h5>
+            <p class="panel-hint">${escapeHTML(this.t('resetDeviceHint'))}</p>
+            <button type="button" class="btn btn--ghost btn--danger-outline" onclick="app.factoryReset()">${escapeHTML(this.t('resetDeviceBtn'))}</button>
           </div>
         `;
         break;
     }
   },
+  // Customer reviews waiting for a decision, newest first.
+  reviewModerationHtml() {
+    const all = this.allReviews || [];
+    const pending = all.filter(r => r.status === 'pending');
+    const decided = all.filter(r => r.status !== 'pending').slice(0, 20);
+    const locale = this.lang === 'ku' ? 'ckb' : 'en-GB';
+    const card = r => `
+      <article class="moderation-card" data-status="${escapeHTML(r.status)}">
+        <header class="moderation-card__head">
+          <strong>${escapeHTML(r.name)}</strong>
+          <span class="text-small panel-muted">${escapeHTML(r.createdAt ? new Date(r.createdAt).toLocaleString(locale) : '')}</span>
+          ${Number.isInteger(r.rating) ? `<span class="stars" aria-label="${escapeHTML(this.t('reviewStarsLabel').replace('{n}', r.rating))}">${'★'.repeat(r.rating)}</span>` : ''}
+        </header>
+        <p class="moderation-card__text">${escapeHTML(r.text)}</p>
+        <div class="moderation-card__actions">
+          ${r.status !== 'approved' ? `<button type="button" class="btn btn--primary btn--xs" onclick="app.moderate(${jsArg(r.id)}, 'approved')">${escapeHTML(this.t('reviewApprove'))}</button>` : ''}
+          ${r.status !== 'rejected' ? `<button type="button" class="btn btn--ghost btn--xs" onclick="app.moderate(${jsArg(r.id)}, 'rejected')">${escapeHTML(this.t(r.status === 'approved' ? 'reviewUnpublish' : 'reviewReject'))}</button>` : ''}
+          <button type="button" class="btn btn--ghost btn--xs user-delete-btn" onclick="app.removeModeratedReview(${jsArg(r.id)})">${escapeHTML(this.t('usersDelete'))}</button>
+        </div>
+      </article>`;
+    return `
+      <section class="moderation" aria-labelledby="moderationTitle">
+        <h4 class="panel-tab-title" id="moderationTitle">${escapeHTML(this.t('reviewsPendingTitle'))} (${pending.length})</h4>
+        ${pending.length ? pending.map(card).join('') : `<p class="panel-hint">${escapeHTML(this.t('reviewsPendingEmpty'))}</p>`}
+        ${decided.length ? `<details class="moderation-history"><summary>${escapeHTML(this.t('reviewsDecidedTitle'))} (${decided.length})</summary>${decided.map(card).join('')}</details>` : ''}
+      </section>`;
+  },
+
+  async moderate(id, status) {
+    await this.runWrite(() => store.moderateReview(id, status, this.session?.uid), {
+      successMsg: status === 'approved' ? this.t('reviewApproved') : this.t('reviewRejected'),
+    });
+  },
+
+  async removeModeratedReview(id) {
+    const ok = await this.confirmDialog({ title: this.t('usersDelete'), message: this.t('reviewDeleteConfirm'), okLabel: this.t('usersDelete'), danger: true });
+    if (!ok) return;
+    await this.runWrite(() => store.deleteReview(id), { successMsg: this.t('toastDeleted') });
+  },
+
 
   // Theme System (Section 7.16)
   renderThemeTab(content) {
@@ -4119,14 +4472,14 @@ const app = {
       const isActive = id === currentPreset;
       
       presetsHtml += `
-        <div class="theme-preset-card ${isActive ? 'active' : ''}" onclick="app.previewTheme('${id}')">
-          <div style="font-weight:600;font-size:0.95rem;color:var(--ink);">${theme.label[this.lang]}</div>
+        <div class="theme-preset-card ${isActive ? 'active' : ''}" onclick="app.previewTheme(${jsArg(id)})">
+          <div style="font-weight:600;font-size:0.95rem;color:var(--ink);">${escapeHTML(theme.label[this.lang])}</div>
           <div class="theme-swatches">
-            <div class="theme-swatch" style="background:${t.cream}"></div>
-            <div class="theme-swatch" style="background:${t.berry}"></div>
-            <div class="theme-swatch" style="background:${t.ink}"></div>
-            <div class="theme-swatch" style="background:${t.gold}"></div>
-            <div class="theme-swatch" style="background:${t.blush}"></div>
+            <div class="theme-swatch" style="background:${escapeHTML(t.cream)}"></div>
+            <div class="theme-swatch" style="background:${escapeHTML(t.berry)}"></div>
+            <div class="theme-swatch" style="background:${escapeHTML(t.ink)}"></div>
+            <div class="theme-swatch" style="background:${escapeHTML(t.gold)}"></div>
+            <div class="theme-swatch" style="background:${escapeHTML(t.blush)}"></div>
           </div>
         </div>
       `;
@@ -4199,36 +4552,30 @@ const app = {
     this._previewThemeId = presetId;
   },
 
-  saveTheme() {
+  async saveTheme() {
     const presetId = this._previewThemeId || (this.config.theme ? this.config.theme.presetId : 'berry');
     if (!THEMES[presetId]) return;
-    
-    const autoDark = document.getElementById('cfgAutoDark') ? document.getElementById('cfgAutoDark').checked : (this.config.theme ? this.config.theme.autoDark : false);
-    const mode = this.config.theme ? (this.config.theme.mode || 'light') : 'light';
-
-    this.config.theme = {
-      presetId: presetId,
-      tokens: THEMES[presetId].tokens,
-      mode: mode,
-      autoDark: autoDark
-    };
-    
-    this.saveConfig();
-    this.applyTheme(this.config.theme.tokens);
-    this.showToast(this.t('themeApplied'), 'success');
-    
-    // Update active UI (so it remains correct if they click around later)
-    this._previewThemeId = null;
-    this.renderThemeTab(document.getElementById('panelContent'));
+    const autoDark = document.getElementById('cfgAutoDark') ? document.getElementById('cfgAutoDark').checked : Boolean(this.config.theme && this.config.theme.autoDark);
+    const mode = (this.config.theme && this.config.theme.mode) || 'light';
+    const ok = await this.commitConfig('theme', c => {
+      c.theme = { presetId, tokens: THEMES[presetId].tokens, mode, autoDark };
+      return null;
+    }, { quiet: true });
+    if (ok) {
+      this._previewThemeId = null;
+      this.applyTheme(this.config.theme.tokens);
+      this.showToast(this.t('themeApplied'), 'success');
+      this.renderThemeTab(document.getElementById('panelContent'));
+    }
   },
 
-  toggleAutoDark(checked) {
-    if (!this.config.theme) return;
-    this.config.theme.autoDark = checked;
-    this.saveConfig();
-    this.applyTheme(this.config.theme.tokens);
-    this.showToast(this.t('toastSaved'), 'success');
+
+  async toggleAutoDark(checked) {
+    const ok = await this.commitConfig('theme', c => { c.theme = { ...c.theme, autoDark: Boolean(checked) }; return null; });
+    if (ok) this.applyTheme(this.config.theme.tokens);
+    else this.renderThemeTab(document.getElementById('panelContent'));
   },
+
 
   revertTheme() {
     if (this._previewThemeId) {
@@ -4250,199 +4597,105 @@ const app = {
 
   // Staff Panel: Customers Management (Section 7.7d)
   // ─── Users Tab (Admin & Dev) ────────────────────────────────────────────
+  // ─── Users Tab: staff directory (Admin & Dev) ─────────────────────────────
+  // Roles are enforced with Firebase custom claims. This list records who should have which role;
+  // scripts/set-staff-claims.mjs applies it. Passwords are managed in Firebase Authentication only.
   renderUsersTab(content) {
     if (!content) return;
-    const me = this.session && this.session.user ? this.session.user : null;
-    // Admins and Devs manage users here; staff never reach this tab.
+    const me = this.session;
     if (!me || (me.role !== 'admin' && me.role !== 'dev')) {
-      content.innerHTML = `<p style="color:var(--muted);">${this.t('usersNoAccess')}</p>`;
+      content.innerHTML = `<p class="panel-hint">${escapeHTML(this.t('usersNoAccess'))}</p>`;
       return;
     }
-
     const q = (this.userSearchQuery || '').toLowerCase().trim();
-    let list = (this.users || []).slice();
-    if (q) {
-      list = list.filter(u =>
-        (u.name && u.name.toLowerCase().includes(q)) ||
-        (u.username && u.username.toLowerCase().includes(q)) ||
-        (u.phone && u.phone.includes(q))
-      );
-    }
-    // Devs and admins first, then alphabetical
-    const roleOrder = { dev: 0, admin: 1, staff: 2, customer: 3 };
-    list.sort((a, b) => (roleOrder[a.role] ?? 9) - (roleOrder[b.role] ?? 9) || (a.name || '').localeCompare(b.name || ''));
-
-    const canDelete = (u) => {
-      if (me.id === u.id || me.username === u.username) return false; // can't delete yourself
-      if (u.role === 'dev' && me.role !== 'dev') return false;        // admin can't delete dev
-      if (u.role === 'admin' && me.role !== 'dev') return false;      // admin can't delete admin
-      return true;
-    };
+    let list = (this.staffDirectory || []).slice();
+    if (q) list = list.filter(u => [u.name, u.email, u.uid].some(x => String(x || '').toLowerCase().includes(q)));
+    list.sort((a, b) => (a.role === 'admin' ? 0 : 1) - (b.role === 'admin' ? 0 : 1) || String(a.name || '').localeCompare(String(b.name || '')));
 
     const rowsHtml = list.length === 0
-      ? `<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--muted);">${this.t('usersEmpty')}</td></tr>`
+      ? `<tr><td colspan="5" class="panel-table__empty">${escapeHTML(this.t('usersEmpty'))}</td></tr>`
       : list.map(u => {
-          const isSelf = me.id === u.id || me.username === u.username;
-          const badgeClass = u.role === 'dev' ? 'badge--dev'
-            : u.role === 'admin' ? 'badge--admin'
-            : u.role === 'staff' ? 'badge--staff'
-            : 'badge--customer';
-          const perms = Array.isArray(u.permissions) && u.permissions.length
-            ? u.permissions.map(p => this.t('perm_' + p) || p).join(', ')
-            : '—';
+          const perms = u.role === 'staff' && Array.isArray(u.perms) && u.perms.length ? u.perms.map(p => this.t('perm_' + p) || p).join(', ') : '—';
+          const isSelf = u.uid === me.uid;
           return `
             <tr>
-              <td><span class="badge ${badgeClass}">${this.t('role_' + u.role) || String(u.role).toUpperCase()}</span></td>
-              <td><strong>${this.esc(u.name || '—')}</strong></td>
-              <td dir="ltr">${this.esc(u.username || u.phone || '—')}</td>
-              <td style="color:var(--muted);">${u.password ? '••••••••' : this.t('usersNoPassword')}</td>
-              <td style="max-width:180px;">${u.role === 'staff' ? `<span class="user-perms">${this.esc(perms)}</span>` : '<span class="user-perms">—</span>'}</td>
-              <td style="text-align:right;white-space:nowrap;">
-                ${u.role === 'staff' || (u.role !== 'dev' && canDelete(u)) ? `
-                  <button type="button" class="btn btn--secondary btn--xs" onclick="app.editUser('${u.id}')">${this.t('usersEdit')}</button>
-                ` : ''}
-                ${u.password && canDelete(u) ? `
-                  <button type="button" class="btn btn--secondary btn--xs" onclick="app.resetUserPassword('${u.id}')">${this.t('usersResetPw')}</button>
-                ` : ''}
-                ${canDelete(u) ? `
-                  <button type="button" class="btn btn--ghost btn--xs user-delete-btn" onclick="app.deleteUser('${u.id}')">${this.t('usersDelete')}</button>
-                ` : (isSelf ? `<span class="user-self-hint">${this.t('usersYou')}</span>` : '')}
+              <td><span class="badge ${u.role === 'admin' ? 'badge--admin' : 'badge--staff'}">${escapeHTML(this.t('role_' + u.role) || u.role)}</span></td>
+              <td><strong>${escapeHTML(u.name || '—')}</strong></td>
+              <td dir="ltr">${escapeHTML(u.email || '—')}<br><span class="text-small panel-muted">${escapeHTML(u.uid)}</span></td>
+              <td class="user-perms">${escapeHTML(perms)}</td>
+              <td class="panel-table__actions">
+                <button type="button" class="btn btn--secondary btn--xs" onclick="app.editUser(${jsArg(u.uid)})">${escapeHTML(this.t('usersEdit'))}</button>
+                ${isSelf ? `<span class="user-self-hint">${escapeHTML(this.t('usersYou'))}</span>` : `<button type="button" class="btn btn--ghost btn--xs user-delete-btn" onclick="app.deleteUser(${jsArg(u.uid)})">${escapeHTML(this.t('usersDelete'))}</button>`}
               </td>
-            </tr>
-          `;
+            </tr>`;
         }).join('');
 
     content.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
-        <h4 style="font-family:var(--font-serif);margin:0;">${this.t('usersTitle')} (${list.length})</h4>
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-          <input
-            type="text"
-            class="form-input"
-            style="padding:6px 12px;font-size:0.85rem;width:190px;"
-            placeholder="${this.t('usersSearch')}"
-            value="${this.esc(this.userSearchQuery || '')}"
-            oninput="app.handleUserSearch(this.value)"
-          />
-          <button type="button" class="btn btn--primary btn--sm" onclick="app.showAddStaffModal()">+ ${this.t('usersAddStaff')}</button>
+      <div class="panel-tab-head">
+        <h4 class="panel-tab-title">${escapeHTML(this.t('usersTitle'))} (${list.length})</h4>
+        <div class="panel-tab-tools">
+          <label class="sr-only" for="userSearchInput">${escapeHTML(this.t('usersSearch'))}</label>
+          <input type="search" id="userSearchInput" class="form-input form-input--compact" placeholder="${escapeHTML(this.t('usersSearch'))}" value="${escapeHTML(this.userSearchQuery || '')}" oninput="app.handleUserSearch(this.value)" />
+          <button type="button" class="btn btn--primary btn--sm" onclick="app.showAddStaffModal()">+ ${escapeHTML(this.t('usersAddStaff'))}</button>
         </div>
       </div>
-      <p style="font-size:0.8rem;color:var(--muted);margin:0 0 12px 0;">${this.t('usersHint')}</p>
+      <div class="panel-callout" role="note">
+        <p>${escapeHTML(this.t('usersClaimsHint'))}</p>
+        <code dir="ltr">npm run staff:claims</code>
+      </div>
       <div class="panel-table-wrap">
         <table class="panel-table">
           <thead>
             <tr>
-              <th>${this.t('usersColRole')}</th>
-              <th>${this.t('usersColName')}</th>
-              <th>${this.t('usersColLogin')}</th>
-              <th>${this.t('usersColPassword')}</th>
-              <th>${this.t('usersColPerms')}</th>
-              <th style="text-align:right;">${this.t('usersColActions')}</th>
+              <th scope="col">${escapeHTML(this.t('usersColRole'))}</th>
+              <th scope="col">${escapeHTML(this.t('usersColName'))}</th>
+              <th scope="col">${escapeHTML(this.t('usersColLogin'))}</th>
+              <th scope="col">${escapeHTML(this.t('usersColPerms'))}</th>
+              <th scope="col" class="panel-table__actions">${escapeHTML(this.t('usersColActions'))}</th>
             </tr>
           </thead>
           <tbody>${rowsHtml}</tbody>
         </table>
-      </div>
-    `;
+      </div>`;
   },
+
 
   handleUserSearch(val) {
     this.userSearchQuery = val;
     const content = document.getElementById('panelContent');
     if (content && this.activePanelTab === 'users') {
       this.renderUsersTab(content);
-      // Restore focus + caret after re-render
-      const input = content.querySelector('input.form-input');
+      const input = document.getElementById('userSearchInput');
       if (input) {
         input.focus();
-        const pos = input.value.length;
-        input.setSelectionRange(pos, pos);
+        input.setSelectionRange(input.value.length, input.value.length);
       }
     }
   },
 
-  editUser(userId) {
-    const u = (this.users || []).find(x => x.id === userId);
+
+  editUser(uid) {
+    const u = (this.staffDirectory || []).find(x => x.uid === uid);
     if (!u) return;
-    const me = this.session && this.session.user ? this.session.user : null;
-    if (me && me.role === 'admin' && (u.role === 'dev' || u.role === 'admin')) return; // admins can only edit staff
-
-    const modal = document.getElementById('editUserModal');
-    if (!modal) return;
-    document.getElementById('editUserId').value = u.id;
-    document.getElementById('editUserName').value = u.name || '';
-    document.getElementById('editUserLogin').value = u.username || u.phone || '';
-    document.getElementById('editUserPermsGroup').style.display = u.role === 'staff' ? 'block' : 'none';
-    const permBoxes = modal.querySelectorAll('input[name="editUserPerms"]');
-    permBoxes.forEach(cb => { cb.checked = Array.isArray(u.permissions) && u.permissions.includes(cb.value); });
-    modal.classList.add('is-open');
+    this.showAddStaffModal(u);
   },
 
-  submitEditUser(e) {
-    e.preventDefault();
-    const id = document.getElementById('editUserId').value;
-    const u = (this.users || []).find(x => x.id === id);
-    if (!u) return;
-    const me = this.session && this.session.user ? this.session.user : null;
-    if (me && me.role === 'admin' && (u.role === 'dev' || u.role === 'admin')) return;
 
-    u.name = document.getElementById('editUserName').value.trim() || u.name;
-    const login = document.getElementById('editUserLogin').value.trim();
-    if (login) {
-      if (u.role === 'customer') u.phone = login; else u.username = login;
-    }
-    if (u.role === 'staff') {
-      const perms = [];
-      document.querySelectorAll('#editUserModal input[name="editUserPerms"]:checked').forEach(cb => perms.push(cb.value));
-      u.permissions = perms;
-    }
-    this.saveUsers();
-    document.getElementById('editUserModal').classList.remove('is-open');
-    const content = document.getElementById('panelContent');
-    if (content && this.activePanelTab === 'users') this.renderUsersTab(content);
-    this.showToast(this.t('toastSaved'), 'success');
+
+
+  async deleteUser(uid) {
+    const u = (this.staffDirectory || []).find(x => x.uid === uid);
+    if (!u || uid === this.session?.uid) return;
+    const ok = await this.confirmDialog({
+      title: this.t('usersDelete'),
+      message: this.t('usersConfirmDelete').replace('{name}', u.name || u.email || u.uid),
+      okLabel: this.t('usersDelete'),
+      danger: true,
+    });
+    if (!ok) return;
+    await this.runWrite(() => store.deleteStaffEntry(uid), { successMsg: this.t('staffRemovedHint') });
   },
 
-  resetUserPassword(userId) {
-    const u = (this.users || []).find(x => x.id === userId);
-    if (!u || !u.password) return;
-    const me = this.session && this.session.user ? this.session.user : null;
-    if (me && me.role === 'admin' && (u.role === 'dev' || u.role === 'admin')) return;
-    const next = prompt(this.t('usersNewPwPrompt').replace('{name}', u.name || u.username || ''), '');
-    if (next === null) return; // cancelled
-    const pw = next.trim();
-    if (pw.length < 4) {
-      this.showToast(this.t('staffPwTooShort') || 'Password must be at least 4 characters.', 'error');
-      return;
-    }
-    u.password = pw;
-    this.saveUsers();
-    const content = document.getElementById('panelContent');
-    if (content && this.activePanelTab === 'users') this.renderUsersTab(content);
-    this.showToast(this.t('toastSaved'), 'success');
-  },
-
-  deleteUser(userId) {
-    const me = this.session && this.session.user ? this.session.user : null;
-    const u = (this.users || []).find(x => x.id === userId);
-    if (!u) return;
-    if (me && (me.id === u.id || me.username === u.username)) {
-      this.showToast(this.t('usersCannotDeleteSelf'), 'error');
-      return;
-    }
-    if (me && me.role === 'admin' && (u.role === 'dev' || u.role === 'admin')) {
-      this.showToast(this.t('usersCannotDeleteElevated'), 'error');
-      return;
-    }
-    const label = u.name || u.username || u.id;
-    if (!confirm(this.t('usersConfirmDelete').replace('{name}', label))) return;
-
-    this.users = this.users.filter(x => x.id !== userId);
-    this.saveUsers(); if (db) { deleteDoc(doc(db, 'users', userId)).catch(e => handleFirestoreError(e, OperationType.DELETE, 'users')); }
-    const content = document.getElementById('panelContent');
-    if (content && this.activePanelTab === 'users') this.renderUsersTab(content);
-    this.showToast(this.t('toastDeleted'), 'success');
-  },
 
   // ─── Phone Preview (Theme & Fonts tabs) ────────────────────────────────
   // Injects a Desktop/Phone toggle bar before an element and, when Phone is
@@ -4487,144 +4740,88 @@ const app = {
     }
   },
 
+  orderTotal(o) {
+    return Number(o.totals?.total ?? o.economy?.total) || 0;
+  },
+
   renderCustomersTab(content) {
     if (!content) return;
-
     const customerMap = new Map();
-
-    (this.users || []).filter(u => u.role === 'customer').forEach(u => {
-      customerMap.set(u.id, {
-        id: u.id,
-        name: u.name || u.username || 'Customer',
-        phone: u.phone || u.mobile || '',
-        createdAt: u.createdAt || Date.now(),
-        orders: []
-      });
+    (this.customers || []).forEach(u => {
+      customerMap.set(u.id, { id: u.id, name: u.name || this.t('customerFallbackName'), phone: u.phone || '', orders: [] });
     });
-
-    (this.orders || []).forEach(o => {
-      const cId = o.customerId;
-      if (customerMap.has(cId)) {
-        customerMap.get(cId).orders.push(o);
-      } else {
-        customerMap.set(cId, {
-          id: cId,
-          name: o.customerName || 'Customer',
-          phone: o.customerMobile || '',
-          createdAt: o.createdAt || Date.now(),
-          orders: [o]
-        });
+    (this.staffOrders || []).forEach(o => {
+      const id = o.customerId;
+      if (!customerMap.has(id)) {
+        customerMap.set(id, { id, name: (o.customer && o.customer.name) || this.t('customerFallbackName'), phone: (o.customer && o.customer.phone) || '', orders: [] });
       }
+      customerMap.get(id).orders.push(o);
     });
 
-    let customerList = Array.from(customerMap.values());
-
-    // Search filter
+    let list = [...customerMap.values()];
     const q = (this.customerSearchQuery || '').toLowerCase().trim();
-    if (q) {
-      customerList = customerList.filter(c => 
-        (c.name && c.name.toLowerCase().includes(q)) || 
-        (c.phone && c.phone.includes(q))
-      );
-    }
-
-    // Sort
+    if (q) list = list.filter(c => String(c.name).toLowerCase().includes(q) || String(c.phone).includes(q));
+    const last = c => (c.orders.length ? Math.max(...c.orders.map(o => o.createdAt || 0)) : 0);
+    const spent = c => c.orders.reduce((s, o) => s + this.orderTotal(o), 0);
     const sort = this.customerSortOption || 'lastOrder';
-    if (sort === 'name') {
-      customerList.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    } else if (sort === 'lastOrder') {
-      customerList.sort((a, b) => {
-        const lastA = a.orders.length > 0 ? Math.max(...a.orders.map(o => o.createdAt || 0)) : 0;
-        const lastB = b.orders.length > 0 ? Math.max(...b.orders.map(o => o.createdAt || 0)) : 0;
-        return lastB - lastA;
-      });
-    } else if (sort === 'totalSpent') {
-      customerList.sort((a, b) => {
-        const spentA = a.orders.reduce((sum, o) => sum + ((o.economy && o.economy.total) || 0), 0);
-        const spentB = b.orders.reduce((sum, o) => sum + ((o.economy && o.economy.total) || 0), 0);
-        return spentB - spentA;
-      });
-    } else if (sort === 'orderCount') {
-      customerList.sort((a, b) => b.orders.length - a.orders.length);
-    }
+    if (sort === 'name') list.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    else if (sort === 'totalSpent') list.sort((a, b) => spent(b) - spent(a));
+    else if (sort === 'orderCount') list.sort((a, b) => b.orders.length - a.orders.length);
+    else list.sort((a, b) => last(b) - last(a));
 
-    const rowsHtml = customerList.length === 0
-      ? `<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text-muted);">${this.t('customersEmpty')}</td></tr>`
-      : customerList.map(c => {
-          const totalSpent = c.orders.reduce((sum, o) => sum + ((o.economy && o.economy.total) || 0), 0);
-          const orderCount = c.orders.length;
-          const lastOrder = c.orders.length > 0
-            ? new Date(Math.max(...c.orders.map(o => o.createdAt || 0))).toLocaleDateString(this.lang === 'ku' ? 'ku' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-            : '—';
+    const locale = this.lang === 'ku' ? 'ckb' : 'en-GB';
+    const rowsHtml = list.length === 0
+      ? `<tr><td colspan="6" class="panel-table__empty">${escapeHTML(this.t('customersEmpty'))}</td></tr>`
+      : list.map(c => `
+          <tr>
+            <td><strong>${escapeHTML(c.name)}</strong></td>
+            <td dir="ltr">${escapeHTML(c.phone || '—')}</td>
+            <td><span class="badge badge--customer">${c.orders.length}</span></td>
+            <td class="panel-money">${escapeHTML(this.formatPrice(spent(c)))}</td>
+            <td>${escapeHTML(last(c) ? new Date(last(c)).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' }) : '—')}</td>
+            <td><button type="button" class="btn btn--xs btn--secondary" onclick="app.openCustomerDrawer(${jsArg(c.id)})">${escapeHTML(this.t('myOrdersDetails'))}</button></td>
+          </tr>`).join('');
 
-          return `
-            <tr>
-              <td><strong>${c.name}</strong></td>
-              <td>${c.phone || '—'}</td>
-              <td><span class="badge badge--customer">${orderCount}</span></td>
-              <td style="font-weight:600;color:var(--berry);">${this.formatPrice(totalSpent)}</td>
-              <td>${lastOrder}</td>
-              <td>
-                <button type="button" class="btn btn--xs btn--secondary" onclick="app.openCustomerDrawer('${c.id}')">
-                  ${this.t('myOrdersDetails')}
-                </button>
-              </td>
-            </tr>
-          `;
-        }).join('');
-
+    const opt = (v, k) => `<option value="${v}" ${sort === v ? 'selected' : ''}>${escapeHTML(this.t(k))}</option>`;
     content.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
-        <h4 style="font-family:var(--font-serif);margin:0;">${this.t('tabCustomers')} (${customerList.length})</h4>
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-          <input 
-            type="text" 
-            class="form-input" 
-            style="padding:6px 12px;font-size:0.85rem;width:200px;" 
-            placeholder="${this.t('customersSearch')}" 
-            value="${this.customerSearchQuery || ''}"
-            oninput="app.handleCustomerSearch(this.value)"
-          />
-          <select 
-            class="form-select" 
-            style="padding:6px 12px;font-size:0.85rem;"
-            onchange="app.handleCustomerSort(this.value)"
-          >
-            <option value="lastOrder" ${sort === 'lastOrder' ? 'selected' : ''}>${this.t('customersSortLastOrder')}</option>
-            <option value="totalSpent" ${sort === 'totalSpent' ? 'selected' : ''}>${this.t('customersSortTotalSpent')}</option>
-            <option value="orderCount" ${sort === 'orderCount' ? 'selected' : ''}>${this.t('customersSortOrderCount')}</option>
-            <option value="name" ${sort === 'name' ? 'selected' : ''}>${this.t('customersSortName')}</option>
+      <div class="panel-tab-head">
+        <h4 class="panel-tab-title">${escapeHTML(this.t('tabCustomers'))} (${list.length})</h4>
+        <div class="panel-tab-tools">
+          <label class="sr-only" for="customerSearchInput">${escapeHTML(this.t('customersSearch'))}</label>
+          <input type="search" id="customerSearchInput" class="form-input form-input--compact" placeholder="${escapeHTML(this.t('customersSearch'))}" value="${escapeHTML(this.customerSearchQuery || '')}" oninput="app.handleCustomerSearch(this.value)" />
+          <label class="sr-only" for="customerSortSelect">${escapeHTML(this.t('sortLabel'))}</label>
+          <select id="customerSortSelect" class="form-select form-input--compact" onchange="app.handleCustomerSort(this.value)">
+            ${opt('lastOrder', 'customersSortLastOrder')}${opt('totalSpent', 'customersSortTotalSpent')}${opt('orderCount', 'customersSortOrderCount')}${opt('name', 'customersSortName')}
           </select>
         </div>
       </div>
-
+      <p class="panel-hint">${escapeHTML(this.t('customersScopeHint'))}</p>
       <div class="panel-table-wrap">
         <table class="panel-table">
-          <thead>
-            <tr>
-              <th>${this.t('customersSortName')}</th>
-              <th>Phone</th>
-              <th>${this.t('customerOrders')}</th>
-              <th>${this.t('customerTotalSpent')}</th>
-              <th>${this.t('customerLastOrder')}</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rowsHtml}
-          </tbody>
+          <thead><tr>
+            <th scope="col">${escapeHTML(this.t('customersSortName'))}</th>
+            <th scope="col">${escapeHTML(this.t('colPhone'))}</th>
+            <th scope="col">${escapeHTML(this.t('customerOrders'))}</th>
+            <th scope="col">${escapeHTML(this.t('customerTotalSpent'))}</th>
+            <th scope="col">${escapeHTML(this.t('customerLastOrder'))}</th>
+            <th scope="col"><span class="sr-only">${escapeHTML(this.t('usersColActions'))}</span></th>
+          </tr></thead>
+          <tbody>${rowsHtml}</tbody>
         </table>
-      </div>
-    `;
+      </div>`;
   },
+
 
   handleCustomerSearch(val) {
     this.customerSearchQuery = val;
     const content = document.getElementById('panelContent');
     if (content && this.activePanelTab === 'customers') {
       this.renderCustomersTab(content);
+      const input = document.getElementById('customerSearchInput');
+      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
     }
   },
+
 
   handleCustomerSort(val) {
     this.customerSortOption = val;
@@ -4636,13 +4833,16 @@ const app = {
 
   openCustomerDrawer(customerId) {
     this.selectedStaffCustomerId = customerId;
+    this.customerNoteText = '';
     let drawer = document.getElementById('staffCustomerDrawer');
     let backdrop = document.getElementById('staffCustomerBackdrop');
-
     if (!drawer) {
       drawer = document.createElement('div');
       drawer.id = 'staffCustomerDrawer';
       drawer.className = 'customer-drawer';
+      drawer.setAttribute('role', 'dialog');
+      drawer.setAttribute('aria-modal', 'true');
+      drawer.setAttribute('aria-labelledby', 'customerDrawerTitle');
       document.body.appendChild(drawer);
     }
     if (!backdrop) {
@@ -4652,112 +4852,99 @@ const app = {
       backdrop.onclick = () => this.closeCustomerDrawer();
       document.body.appendChild(backdrop);
     }
-
+    if (this._noteUnsub) this._noteUnsub();
+    this._noteUnsub = canAccessTab(this.session, 'customers') && store
+      ? store.watchCustomerNote(customerId, text => {
+          this.customerNoteText = text;
+          const box = document.getElementById('customerNoteBox');
+          if (box && document.activeElement !== box) box.value = text;
+        }, err => this.reportListenerError('customer note', err))
+      : null;
     this.renderCustomerDrawerContent();
-    drawer.classList.add('is-open');
     backdrop.classList.add('is-open');
+    this.openDialog('staffCustomerDrawer', document.activeElement, { onEscape: () => this.closeCustomerDrawer() });
   },
+
 
   closeCustomerDrawer() {
+    if (this._noteUnsub) { this._noteUnsub(); this._noteUnsub = null; }
+    const wasOpen = Boolean(this.selectedStaffCustomerId);
     this.selectedStaffCustomerId = null;
-    const drawer = document.getElementById('staffCustomerDrawer');
     const backdrop = document.getElementById('staffCustomerBackdrop');
-    if (drawer) drawer.classList.remove('is-open');
     if (backdrop) backdrop.classList.remove('is-open');
+    if (wasOpen) this.closeDialog('staffCustomerDrawer');
   },
 
-  updateOrderStatus(orderId, newStatus) {
-    const order = this.orders.find(o => o.id === orderId);
-    if (order) {
-      order.status = newStatus;
-      this.saveOrders();
-      this.renderCustomerDrawerContent();
-      const content = document.getElementById('panelContent');
-      if (content && this.activePanelTab === 'customers') {
-        this.renderCustomersTab(content);
-      }
-      this.showToast(this.t('orderStatusUpdated').replace('{status}', newStatus), 'success');
-    }
+
+  async updateOrderStatus(orderId, newStatus) {
+    const ok = await this.runWrite(() => store.updateOrderStatus(orderId, newStatus, this.session?.uid), { quiet: true });
+    if (ok) this.showToast(this.t('orderStatusUpdated').replace('{status}', this.t('orderStatus' + newStatus[0].toUpperCase() + newStatus.slice(1))), 'success');
+    else this.renderCustomerDrawerContent();
   },
 
-  saveCustomerPrivateNote(customerId, noteText) {
-    this.customerNotes[customerId] = noteText;
-    this.saveCustomerNotes();
-    this.showToast(this.t('noteSaved'), 'success');
+
+  async saveCustomerPrivateNote(customerId, noteText) {
+    await this.runWrite(() => store.saveCustomerNote(customerId, noteText, this.session?.uid), { successMsg: this.t('noteSaved') });
   },
+
 
   renderCustomerDrawerContent() {
     const drawer = document.getElementById('staffCustomerDrawer');
-    if (!drawer || !this.selectedStaffCustomerId) return;
-
     const cId = this.selectedStaffCustomerId;
-    const user = (this.users || []).find(u => u.id === cId);
-    const orders = (this.orders || []).filter(o => o.customerId === cId || (user && user.phone && o.customerMobile === user.phone));
-    const name = (user && user.name) || (orders.length > 0 && orders[0].customerName) || 'Customer';
-    const phone = (user && user.phone) || (orders.length > 0 && orders[0].customerMobile) || '—';
-    const note = this.customerNotes[cId] || '';
-    const totalSpent = orders.reduce((sum, o) => sum + ((o.economy && o.economy.total) || 0), 0);
+    if (!drawer || !cId) return;
+    const profile = (this.customers || []).find(u => u.id === cId);
+    const orders = (this.staffOrders || []).filter(o => o.customerId === cId);
+    const name = (profile && profile.name) || (orders[0] && orders[0].customer && orders[0].customer.name) || this.t('customerFallbackName');
+    const phone = (profile && profile.phone) || (orders[0] && orders[0].customer && orders[0].customer.phone) || '—';
+    const totalSpent = orders.reduce((s, o) => s + this.orderTotal(o), 0);
+    const locale = this.lang === 'ku' ? 'ckb' : 'en-GB';
+    const statuses = ['pending', 'confirmed', 'completed', 'cancelled'];
 
     const ordersHtml = orders.length === 0
-      ? `<div style="padding:20px;text-align:center;color:var(--text-muted);">${this.t('customerNoOrders')}</div>`
+      ? `<p class="panel-hint">${escapeHTML(this.t('customerNoOrders'))}</p>`
       : orders.map(o => {
-          const dateStr = new Date(o.createdAt).toLocaleDateString(this.lang === 'ku' ? 'ku' : 'en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-          });
-          const itemsStr = (o.items || []).map(it => `${it.qty}× ${it.nameSnapshot} ($${((it.usdSnapshot || 0) * it.qty).toFixed(2)})`).join('<br/>');
-          const totalStr = this.formatPrice((o.economy && o.economy.total) || 0);
-
+          const items = (o.items || []).map(it => `${it.qty}× ${it.name || it.nameSnapshot || it.productId} (${this.formatPrice((it.unitPriceUSD ?? it.usdSnapshot ?? 0) * it.qty)})`);
+          const status = { baking: 'confirmed', delivered: 'completed' }[o.status] || o.status;
           return `
-            <div style="background:var(--bg-glass);border:1px solid var(--gold-border);border-radius:10px;padding:12px;margin-bottom:12px;">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                <span style="font-weight:700;font-size:0.85rem;">#${o.id.slice(-6).toUpperCase()}</span>
-                <span style="font-size:0.75rem;color:var(--text-muted);">${dateStr}</span>
+            <div class="drawer-order">
+              <div class="drawer-order__head">
+                <span class="drawer-order__id">#${escapeHTML(String(o.id).slice(-6).toUpperCase())}</span>
+                <span class="drawer-order__date">${escapeHTML(new Date(o.createdAt).toLocaleString(locale))}</span>
               </div>
-              <div style="font-size:0.85rem;line-height:1.5;margin-bottom:8px;">${itemsStr}</div>
-              <div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px dashed var(--gold-border);">
-                <div style="font-weight:700;color:var(--berry);">${totalStr}</div>
-                <div style="display:flex;align-items:center;gap:6px;">
-                  <label style="font-size:0.75rem;color:var(--text-muted);">${this.t('customerChangeStatus')}:</label>
-                  <select class="form-select" style="padding:2px 8px;font-size:0.75rem;width:auto;" onchange="app.updateOrderStatus('${o.id}', this.value)">
-                    <option value="pending" ${o.status === 'pending' ? 'selected' : ''}>Pending</option>
-                    <option value="baking" ${o.status === 'baking' ? 'selected' : ''}>Baking</option>
-                    <option value="delivered" ${o.status === 'delivered' ? 'selected' : ''}>Delivered</option>
-                    <option value="cancelled" ${o.status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
+              <div class="drawer-order__items">${items.map(escapeHTML).join('<br>')}</div>
+              ${o.fulfillmentAt ? `<div class="drawer-order__meta">${escapeHTML(this.t('historyRequestedFor'))}: ${escapeHTML(formatFulfillment(new Date(o.fulfillmentAt), this.lang))}</div>` : ''}
+              ${o.customer && o.customer.address ? `<div class="drawer-order__meta">${escapeHTML(this.t('checkoutAddressLabel'))}: ${escapeHTML(o.customer.address)}</div>` : ''}
+              ${o.note ? `<div class="drawer-order__meta">${escapeHTML(this.t('orderNoteLabel'))}: ${escapeHTML(o.note)}</div>` : ''}
+              <div class="drawer-order__foot">
+                <strong class="panel-money">${escapeHTML(this.formatPrice(this.orderTotal(o)))}</strong>
+                <label class="drawer-order__status">
+                  <span>${escapeHTML(this.t('customerChangeStatus'))}</span>
+                  <select class="form-select form-input--compact" onchange="app.updateOrderStatus(${jsArg(o.id)}, this.value)">
+                    ${statuses.map(st => `<option value="${st}" ${status === st ? 'selected' : ''}>${escapeHTML(this.t('orderStatus' + st[0].toUpperCase() + st.slice(1)))}</option>`).join('')}
                   </select>
-                </div>
+                </label>
               </div>
-            </div>
-          `;
+            </div>`;
         }).join('');
 
     drawer.innerHTML = `
       <div class="customer-drawer-header">
         <div>
-          <h3 style="margin:0;font-family:var(--font-serif);">${name}</h3>
-          <p style="margin:4px 0 0;font-size:0.82rem;color:var(--text-muted);">${phone} • ${orders.length} orders • ${this.formatPrice(totalSpent)}</p>
+          <h3 id="customerDrawerTitle" class="customer-drawer-title">${escapeHTML(name)}</h3>
+          <p class="panel-hint" dir="auto">${escapeHTML(phone)} · ${orders.length} · ${escapeHTML(this.formatPrice(totalSpent))}</p>
         </div>
-        <button type="button" class="btn btn--ghost btn--sm" onclick="app.closeCustomerDrawer()">✕</button>
+        <button type="button" class="modal-close" onclick="app.closeCustomerDrawer()" aria-label="${escapeHTML(this.t('btnClose'))}">✕</button>
       </div>
       <div class="customer-drawer-body">
-        <div style="margin-bottom:20px;">
-          <label class="form-label" style="font-weight:600;margin-bottom:6px;display:block;">${this.t('customerPrivateNote')}</label>
-          <textarea 
-            class="form-textarea" 
-            rows="3" 
-            placeholder="E.g. Prefers less sugar, regular customer..." 
-            onchange="app.saveCustomerPrivateNote('${cId}', this.value)"
-          >${note}</textarea>
+        <div class="form-group">
+          <label class="form-label" for="customerNoteBox">${escapeHTML(this.t('customerPrivateNote'))}</label>
+          <textarea id="customerNoteBox" class="form-textarea" rows="3" onchange="app.saveCustomerPrivateNote(${jsArg(cId)}, this.value)">${escapeHTML(this.customerNoteText || '')}</textarea>
         </div>
-
-        <h4 style="font-family:var(--font-serif);margin:0 0 12px;">${this.t('customerOrders')} (${orders.length})</h4>
+        <h4 class="panel-tab-title">${escapeHTML(this.t('customerOrders'))} (${orders.length})</h4>
         ${ordersHtml}
-      </div>
-    `;
+      </div>`;
   },
+
 
   // Save Handlers for Tabs
   initLogoDraft() {
@@ -4793,17 +4980,17 @@ const app = {
     const hasUrl = mode === 'url' && Boolean(d.url && d.url.trim());
 
     if (d.fallback || mode === 'emoji' || (!hasImage && !hasUrl)) {
-      previewInner = `<span class="logo-preview-emoji">${d.emoji || '🎂'}</span>`;
+      previewInner = `<span class="logo-preview-emoji">${escapeHTML(d.emoji || '🎂')}</span>`;
     } else if (mode === 'image' && hasImage) {
-      previewInner = `<img src="${d.image}" class="logo-preview-img" alt="Logo preview" onerror="app.handleLogoPreviewError()" onload="app.handleLogoPreviewSuccess()" />`;
+      previewInner = `<img src="${escapeHTML(d.image)}" class="logo-preview-img" alt="Logo preview" onerror="app.handleLogoPreviewError()" onload="app.handleLogoPreviewSuccess()" />`;
     } else if (mode === 'url' && hasUrl) {
-      previewInner = `<img src="${d.url}" class="logo-preview-img" alt="Logo preview" crossorigin="anonymous" onerror="app.handleLogoPreviewError()" onload="app.handleLogoPreviewSuccess()" />`;
+      previewInner = `<img src="${escapeHTML(d.url)}" class="logo-preview-img" alt="Logo preview" crossorigin="anonymous" onerror="app.handleLogoPreviewError()" onload="app.handleLogoPreviewSuccess()" />`;
     }
 
     // Preview caption & meta
     let metaText = '';
     if (mode === 'emoji') {
-      metaText = `${this.t('logoModeEmoji')} · ${d.emoji || '🎂'}`;
+      metaText = `${this.t('logoModeEmoji')} · ${escapeHTML(d.emoji || '🎂')}`;
     } else if (mode === 'image') {
       const sizeStr = d.imageBytes > 0
         ? (d.imageBytes > 1024 ? Math.round(d.imageBytes / 1024) + ' KB' : d.imageBytes + ' B')
@@ -4840,7 +5027,7 @@ const app = {
             <div class="logo-preview-box ${d.fallback ? 'is-fallback' : ''}" id="logoPreviewBox">
               ${previewInner}
             </div>
-            <div class="logo-preview-meta" id="logoPreviewMeta">${metaText}</div>
+            <div class="logo-preview-meta" id="logoPreviewMeta">${escapeHTML(metaText)}</div>
             ${statusChip ? `<div id="logoStatusChipArea">${statusChip}</div>` : '<div id="logoStatusChipArea"></div>'}
             ${d.fallback ? `<div class="logo-warning-note">${this.t('logoFallbackWarning')}</div>` : ''}
             ${showRemove ? `
@@ -4869,11 +5056,11 @@ const app = {
             <div id="logoModeEmojiArea" style="display:${mode === 'emoji' ? 'block' : 'none'};">
               <div class="form-group" style="margin-bottom:0;">
                 <label class="form-label" for="logoEmojiInput">${this.t('logoEmojiLabel')}</label>
-                <input type="text" id="logoEmojiInput" class="form-input" maxlength="4" value="${(d.emoji || '🎂').replace(/"/g, '&quot;')}" oninput="app.handleLogoEmojiInput(this.value)" style="max-width:140px;font-size:1.3rem;text-align:center;" />
+                <input type="text" id="logoEmojiInput" class="form-input" maxlength="4" value="${escapeHTML((d.emoji || '🎂'))}" oninput="app.handleLogoEmojiInput(this.value)" style="max-width:140px;font-size:1.3rem;text-align:center;" />
                 <p style="font-size:0.78rem;color:var(--muted);margin:4px 0 8px 0;">${this.t('logoEmojiHint')}</p>
                 <div class="quick-pick-emojis">
                   ${['🎂', '🍰', '🧁', '🍩', '🍪', '🥐', '🍫', '☕'].map(em => `
-                    <button type="button" class="quick-pick-btn" onclick="app.selectQuickEmoji('${em}')" title="${em}" aria-label="Select ${em}">${em}</button>
+                    <button type="button" class="quick-pick-btn" onclick="app.selectQuickEmoji(${jsArg(em)})" title="${escapeHTML(em)}" aria-label="Select ${escapeHTML(em)}">${escapeHTML(em)}</button>
                   `).join('')}
                 </div>
               </div>
@@ -4898,7 +5085,7 @@ const app = {
             <div id="logoModeUrlArea" style="display:${mode === 'url' ? 'block' : 'none'};">
               <div class="form-group" style="margin-bottom:0;">
                 <label class="form-label" for="logoUrlInput">${this.t('logoUrlLabel')}</label>
-                <input type="url" id="logoUrlInput" class="form-input" dir="ltr" placeholder="https://..." value="${(d.url || '').replace(/"/g, '&quot;')}" oninput="app.handleLogoUrlInput(this.value)" />
+                <input type="url" id="logoUrlInput" class="form-input" dir="ltr" placeholder="https://..." value="${escapeHTML((d.url || ''))}" oninput="app.handleLogoUrlInput(this.value)" />
                 <p style="font-size:0.78rem;color:var(--muted);margin-top:4px;">${this.t('logoUrlHint')}</p>
               </div>
             </div>
@@ -4946,7 +5133,7 @@ const app = {
 
     if (d.mode === 'emoji') {
       box.className = 'logo-preview-box';
-      box.innerHTML = `<span class="logo-preview-emoji">${d.emoji || '🎂'}</span>`;
+      box.innerHTML = `<span class="logo-preview-emoji">${escapeHTML(d.emoji || '🎂')}</span>`;
       if (meta) meta.textContent = `${this.t('logoModeEmoji')} · ${d.emoji || '🎂'}`;
     }
   },
@@ -5062,45 +5249,45 @@ const app = {
     this.showToast(this.t('logoRemoved'), 'info');
   },
 
-  saveBrandSettings(e) {
+  async saveBrandSettings(e) {
     if (e) e.preventDefault();
-    this.config.shopName.en = document.getElementById('cfgShopNameEn').value.trim();
-    this.config.shopName.ku = document.getElementById('cfgShopNameKu').value.trim();
-    this.config.tagline.en = document.getElementById('cfgTaglineEn').value.trim();
-    this.config.tagline.ku = document.getElementById('cfgTaglineKu').value.trim();
-    this.config.announcement.en = document.getElementById('cfgAnnounceEn').value.trim();
-    this.config.announcement.ku = document.getElementById('cfgAnnounceKu').value.trim();
-
-    if (this.draftLogo) {
-      const finalEmoji = (this.draftLogo.emoji && this.draftLogo.emoji.trim()) || '🎂';
-      this.config.logoMode = this.draftLogo.mode || 'emoji';
-      this.config.logoEmoji = finalEmoji;
-      this.config.logoImage = this.draftLogo.image || '';
-      this.config.logoUrl = this.draftLogo.url || '';
-      this.config.logoImageUrl = this.draftLogo.mode === 'url' ? this.draftLogo.url : (this.draftLogo.mode === 'image' ? this.draftLogo.image : '');
+    const v = id => document.getElementById(id).value.trim();
+    const ok = await this.commitConfig('brand', c => {
+      c.shopName = { en: v('cfgShopNameEn'), ku: v('cfgShopNameKu') };
+      c.tagline = { en: v('cfgTaglineEn'), ku: v('cfgTaglineKu') };
+      c.announcement = { en: v('cfgAnnounceEn'), ku: v('cfgAnnounceKu') };
+      if (this.draftLogo) {
+        c.logoMode = this.draftLogo.mode || 'emoji';
+        c.logoEmoji = (this.draftLogo.emoji && this.draftLogo.emoji.trim()) || '🎂';
+        c.logoImage = this.draftLogo.image || '';
+        c.logoUrl = safeUrl(this.draftLogo.url || '');
+        c.logoImageUrl = c.logoMode === 'url' ? c.logoUrl : '';
+      }
+      return null;
+    });
+    if (ok && this.draftLogo) {
       this.draftLogo.isReadyToSave = false;
+      this.updateLogoCardUI();
     }
-
-    this.saveConfig();
-    this.renderBranding();
-    this.showToast(this.t('toastSaved'), 'success');
-    this.updateLogoCardUI();
   },
 
-  saveAboutSettings(e) {
+
+  async saveAboutSettings(e) {
     e.preventDefault();
-    this.config.aboutUs.en = document.getElementById('cfgAboutEn').value.trim();
-    this.config.aboutUs.ku = document.getElementById('cfgAboutKu').value.trim();
-    this.config.aboutUs.imageUrl = document.getElementById('cfgAboutImage').value.trim();
-    this.config.aboutUs.eyebrowEn = document.getElementById('cfgAboutEyebrowEn').value.trim();
-    this.config.aboutUs.eyebrowKu = document.getElementById('cfgAboutEyebrowKu').value.trim();
-    this.config.aboutUs.titleEn = document.getElementById('cfgAboutTitleEn').value.trim();
-    this.config.aboutUs.titleKu = document.getElementById('cfgAboutTitleKu').value.trim();
-
-    this.saveConfig();
-    this.renderBranding();
-    this.showToast(this.t('toastSaved'), 'success');
+    const v = id => document.getElementById(id).value.trim();
+    await this.commitConfig('about', c => {
+      const imageUrl = v('cfgAboutImage');
+      if (imageUrl && !safeUrl(imageUrl)) return this.t('errInvalidUrl');
+      c.aboutUs = {
+        ...c.aboutUs,
+        en: v('cfgAboutEn'), ku: v('cfgAboutKu'), imageUrl,
+        eyebrowEn: v('cfgAboutEyebrowEn'), eyebrowKu: v('cfgAboutEyebrowKu'),
+        titleEn: v('cfgAboutTitleEn'), titleKu: v('cfgAboutTitleKu'),
+      };
+      return null;
+    });
   },
+
 
   getFaqItemHtml(f, index) {
     return `
@@ -5109,21 +5296,21 @@ const app = {
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">Question (EN)</label>
-            <input type="text" class="form-input faq-q-en" value="${f.q.en}" required />
+            <input type="text" class="form-input faq-q-en" value="${escapeHTML(f.q.en)}" required />
           </div>
           <div class="form-group">
             <label class="form-label">Question (KU)</label>
-            <input type="text" class="form-input faq-q-ku" value="${f.q.ku}" />
+            <input type="text" class="form-input faq-q-ku" value="${escapeHTML(f.q.ku)}" />
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">Answer (EN)</label>
-            <textarea class="form-input faq-a-en" required style="resize:vertical;min-height:60px;">${f.a.en}</textarea>
+            <textarea class="form-input faq-a-en" required style="resize:vertical;min-height:60px;">${escapeHTML(f.a.en)}</textarea>
           </div>
           <div class="form-group">
             <label class="form-label">Answer (KU)</label>
-            <textarea class="form-input faq-a-ku" style="resize:vertical;min-height:60px;">${f.a.ku}</textarea>
+            <textarea class="form-input faq-a-ku" style="resize:vertical;min-height:60px;">${escapeHTML(f.a.ku)}</textarea>
           </div>
         </div>
       </div>
@@ -5149,37 +5336,37 @@ const app = {
         <div class="form-row">
           <div class="form-group" style="flex:0.3">
             <label class="form-label">Initials</label>
-            <input type="text" class="form-input review-initials" value="${r.initials}" required maxlength="2" />
+            <input type="text" class="form-input review-initials" value="${escapeHTML(r.initials)}" required maxlength="2" />
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">Name (EN)</label>
-            <input type="text" class="form-input review-name-en" value="${r.name.en}" required />
+            <input type="text" class="form-input review-name-en" value="${escapeHTML(r.name.en)}" required />
           </div>
           <div class="form-group">
             <label class="form-label">Name (KU)</label>
-            <input type="text" class="form-input review-name-ku" value="${r.name.ku}" />
+            <input type="text" class="form-input review-name-ku" value="${escapeHTML(r.name.ku)}" />
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">Role/Subtitle (EN)</label>
-            <input type="text" class="form-input review-role-en" value="${r.role.en}" required />
+            <input type="text" class="form-input review-role-en" value="${escapeHTML(r.role.en)}" required />
           </div>
           <div class="form-group">
             <label class="form-label">Role/Subtitle (KU)</label>
-            <input type="text" class="form-input review-role-ku" value="${r.role.ku}" />
+            <input type="text" class="form-input review-role-ku" value="${escapeHTML(r.role.ku)}" />
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">Quote (EN)</label>
-            <textarea class="form-input review-quote-en" required style="resize:vertical;min-height:60px;">${r.quote.en}</textarea>
+            <textarea class="form-input review-quote-en" required style="resize:vertical;min-height:60px;">${escapeHTML(r.quote.en)}</textarea>
           </div>
           <div class="form-group">
             <label class="form-label">Quote (KU)</label>
-            <textarea class="form-input review-quote-ku" style="resize:vertical;min-height:60px;">${r.quote.ku}</textarea>
+            <textarea class="form-input review-quote-ku" style="resize:vertical;min-height:60px;">${escapeHTML(r.quote.ku)}</textarea>
           </div>
         </div>
       </div>
@@ -5198,93 +5385,72 @@ const app = {
     this.renderPanelTab('reviews');
   },
 
-  resetReviews() {
-    if (confirm('Are you sure you want to reset all reviews to the default?')) {
-      this.config.reviews = JSON.parse(JSON.stringify(DEFAULT_CONFIG.reviews));
-      this.saveConfig();
-      this.renderReviews();
-      this.renderPanelTab('reviews');
-      this.showToast('Reviews reset successfully', 'success');
-    }
+  async resetReviews() {
+    const ok = await this.confirmDialog({ title: this.t('reviewsResetTitle'), message: this.t('reviewsResetConfirm'), okLabel: this.t('reviewsResetBtn') });
+    if (!ok) return;
+    const saved = await this.commitConfig('reviews', c => { c.reviews = JSON.parse(JSON.stringify(DEFAULT_CONFIG.reviews)); return null; });
+    if (saved) this.renderPanelTab('reviews');
   },
+
   
-  saveReviewSettings(e) {
+  async saveReviewSettings(e) {
     e.preventDefault();
-    if (!this.config.reviews) this.config.reviews = [];
-    
-    const initials = document.querySelectorAll('.review-initials');
-    const namesEn = document.querySelectorAll('.review-name-en');
-    const namesKu = document.querySelectorAll('.review-name-ku');
-    const rolesEn = document.querySelectorAll('.review-role-en');
-    const rolesKu = document.querySelectorAll('.review-role-ku');
-    const quotesEn = document.querySelectorAll('.review-quote-en');
-    const quotesKu = document.querySelectorAll('.review-quote-ku');
-    
-    const newReviews = [];
-    for (let i = 0; i < initials.length; i++) {
-      newReviews.push({
-        initials: initials[i].value.trim(),
-        name: { en: namesEn[i].value.trim(), ku: namesKu[i].value.trim() },
-        role: { en: rolesEn[i].value.trim(), ku: rolesKu[i].value.trim() },
-        quote: { en: quotesEn[i].value.trim(), ku: quotesKu[i].value.trim() }
-      });
-    }
-    
-    this.config.reviews = newReviews;
-    this.saveConfig();
-    this.renderReviews();
-    this.showToast(this.t('toastSaved') || 'Saved', 'success');
+    const all = cls => [...document.querySelectorAll(cls)].map(i => i.value.trim());
+    const initials = all('.review-initials'), namesEn = all('.review-name-en'), namesKu = all('.review-name-ku');
+    const rolesEn = all('.review-role-en'), rolesKu = all('.review-role-ku'), quotesEn = all('.review-quote-en'), quotesKu = all('.review-quote-ku');
+    await this.commitConfig('reviews', c => {
+      c.reviews = initials.map((ini, i) => ({
+        initials: ini.slice(0, 2),
+        name: { en: namesEn[i], ku: namesKu[i] },
+        role: { en: rolesEn[i], ku: rolesKu[i] },
+        quote: { en: quotesEn[i], ku: quotesKu[i] },
+      }));
+      return null;
+    });
   },
 
-  saveFaqSettings(e) {
+
+  async saveFaqSettings(e) {
     e.preventDefault();
-    if (!this.config.faq) this.config.faq = [];
-    
-    const qsEn = document.querySelectorAll('.faq-q-en');
-    const qsKu = document.querySelectorAll('.faq-q-ku');
-    const asEn = document.querySelectorAll('.faq-a-en');
-    const asKu = document.querySelectorAll('.faq-a-ku');
-    
-    const newFaqs = [];
-    for (let i = 0; i < qsEn.length; i++) {
-      newFaqs.push({
-        q: { en: qsEn[i].value.trim(), ku: qsKu[i].value.trim() },
-        a: { en: asEn[i].value.trim(), ku: asKu[i].value.trim() }
-      });
-    }
-    
-    this.config.faq = newFaqs;
-    this.saveConfig();
-    this.renderFAQ();
-    this.showToast(this.t('toastSaved') || 'Saved', 'success');
+    const all = cls => [...document.querySelectorAll(cls)].map(i => i.value.trim());
+    const qsEn = all('.faq-q-en'), qsKu = all('.faq-q-ku'), asEn = all('.faq-a-en'), asKu = all('.faq-a-ku');
+    await this.commitConfig('faq', c => {
+      c.faq = qsEn.map((q, i) => ({ q: { en: q, ku: qsKu[i] }, a: { en: asEn[i], ku: asKu[i] } }));
+      return null;
+    });
   },
 
-  saveContactSettings(e) {
-    e.preventDefault();
-    this.config.contact.whatsapp = document.getElementById('cfgWhatsapp').value.trim().replace(/\D/g, '');
-    this.config.contact.phone = document.getElementById('cfgPhone').value.trim();
-    this.config.contact.email = document.getElementById('cfgEmail').value.trim();
-    this.config.contact.address.en = document.getElementById('cfgAddressEn').value.trim();
-    this.config.contact.address.ku = document.getElementById('cfgAddressKu').value.trim();
-    this.config.contact.hours.en = document.getElementById('cfgHoursEn').value.trim();
-    this.config.contact.hours.ku = document.getElementById('cfgHoursKu').value.trim();
 
-    this.saveConfig();
-    this.renderBranding();
-    this.showToast(this.t('toastSaved'), 'success');
+  async saveContactSettings(e) {
+    e.preventDefault();
+    const v = id => document.getElementById(id).value.trim();
+    await this.commitConfig('contact', c => {
+      const wa = v('cfgWhatsapp').replace(/\D/g, '');
+      if (wa && !normalizeWhatsAppNumber(wa)) return this.t('errInvalidWhatsApp');
+      c.contact = {
+        ...c.contact,
+        whatsapp: wa,
+        phone: v('cfgPhone'),
+        email: v('cfgEmail'),
+        address: { en: v('cfgAddressEn'), ku: v('cfgAddressKu') },
+        hours: { en: v('cfgHoursEn'), ku: v('cfgHoursKu') },
+      };
+      return null;
+    });
   },
 
-  saveSocialSettings(e) {
-    e.preventDefault();
-    this.config.socials.instagram = document.getElementById('cfgInsta').value.trim();
-    this.config.socials.facebook = document.getElementById('cfgFb').value.trim();
-    this.config.socials.tiktok = document.getElementById('cfgTiktok').value.trim();
-    this.config.socials.snapchat = document.getElementById('cfgSnap').value.trim();
 
-    this.saveConfig();
-    this.renderBranding();
-    this.showToast(this.t('toastSaved'), 'success');
+  async saveSocialSettings(e) {
+    e.preventDefault();
+    const v = id => document.getElementById(id).value.trim();
+    await this.commitConfig('socials', c => {
+      const next = { instagram: v('cfgInsta'), facebook: v('cfgFb'), tiktok: v('cfgTiktok'), snapchat: v('cfgSnap') };
+      if (Object.values(next).some(u => u && !/^https:\/\//i.test(u))) return this.t('errInvalidUrl');
+      c.socials = next;
+      return null;
+    });
   },
+
 
   handleFontPreviewChange() {
     const kuBodySel = document.getElementById('cfgKuBody');
@@ -5296,6 +5462,7 @@ const app = {
     const kuDisp = kuDispSel ? kuDispSel.value : ((this.config && this.config.kurdishDisplayFont) || 'Vazirmatn');
     const enBody = enBodySel ? enBodySel.value : ((this.config && this.config.englishBodyFont) || 'DM Sans');
     const enDisp = enDispSel ? enDispSel.value : ((this.config && this.config.englishDisplayFont) || 'Cormorant Garamond');
+    ensureFonts([kuBody, kuDisp, enBody, enDisp]);
 
     const kuHeading = document.getElementById('fontPreviewHeading');
     const kuPara = document.getElementById('fontPreviewBody');
@@ -5326,22 +5493,19 @@ const app = {
     }
   },
 
-  saveFontSettings(e) {
+  async saveFontSettings(e) {
     if (e) e.preventDefault();
-    const kuBodySel = document.getElementById('cfgKuBody');
-    const kuDispSel = document.getElementById('cfgKuDisplay');
-    const enBodySel = document.getElementById('cfgEnBody');
-    const enDispSel = document.getElementById('cfgEnDisplay');
-
-    if (kuBodySel) this.config.kurdishBodyFont = kuBodySel.value;
-    if (kuDispSel) this.config.kurdishDisplayFont = kuDispSel.value;
-    if (enBodySel) this.config.englishBodyFont = enBodySel.value;
-    if (enDispSel) this.config.englishDisplayFont = enDispSel.value;
-
-    this.saveConfig();
+    const sel = id => document.getElementById(id);
+    await this.commitConfig('fonts', c => {
+      if (sel('cfgKuBody')) c.kurdishBodyFont = sel('cfgKuBody').value;
+      if (sel('cfgKuDisplay')) c.kurdishDisplayFont = sel('cfgKuDisplay').value;
+      if (sel('cfgEnBody')) c.englishBodyFont = sel('cfgEnBody').value;
+      if (sel('cfgEnDisplay')) c.englishDisplayFont = sel('cfgEnDisplay').value;
+      return null;
+    });
     this.applyFonts();
-    this.showToast(this.t('toastSaved'), 'success');
   },
+
 
   applyFonts() {
     const isKu = this.lang === 'ku';
@@ -5349,6 +5513,7 @@ const app = {
     const kuDisp = (this.config && this.config.kurdishDisplayFont) || 'Vazirmatn';
     const enBody = (this.config && this.config.englishBodyFont) || 'DM Sans';
     const enDisp = (this.config && this.config.englishDisplayFont) || 'Cormorant Garamond';
+    ensureFonts(isKu ? [kuBody, kuDisp] : [enBody, enDisp]);
     
     // Set preview variables
     document.documentElement.style.setProperty('--font-ku-body', `'${kuBody}', system-ui, sans-serif`);
@@ -5375,7 +5540,7 @@ const app = {
     const baseTokens = tokens || (this.config.theme && this.config.theme.tokens) || THEMES.berry.tokens;
     let activeTokens = { ...baseTokens };
     
-    const mode = this.config && this.config.theme && this.config.theme.mode;
+    const mode = this.themeModePref || (this.config && this.config.theme && this.config.theme.mode);
     const isAutoDark = this.config && this.config.theme && this.config.theme.autoDark;
     const isSystemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     const presetId = this.config && this.config.theme && this.config.theme.presetId;
@@ -5437,6 +5602,10 @@ const app = {
       document.documentElement.removeAttribute('data-auto-dark');
     }
 
+    // Text placed on the accent and gold colours: whichever of light/dark text has more contrast.
+    activeTokens.onAccent = textOn(activeTokens.berry || '#8B4A32');
+    activeTokens.onGold = textOn(activeTokens.gold || '#C99A3D');
+
     Object.entries(activeTokens).forEach(([key, value]) => {
       r.setProperty('--' + key.replace(/([A-Z])/g, '-$1').toLowerCase(), value);
     });
@@ -5475,44 +5644,38 @@ const app = {
     }
   },
 
+  // Visitor preference only: stored on this device, never written to the shop's settings.
   toggleDarkMode() {
-    if (!this.config.theme) this.config.theme = { presetId: 'berry', autoDark: false };
-    const currentMode = this.config.theme.mode || (document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
-    const newMode = currentMode === 'dark' ? 'light' : 'dark';
-    this.config.theme.mode = newMode;
-    this.saveConfig();
-    const presetId = this.config.theme.presetId || 'berry';
-    const tokens = (THEMES[presetId] && THEMES[presetId].tokens) ? THEMES[presetId].tokens : this.config.theme.tokens;
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    this.themeModePref = isDark ? 'light' : 'dark';
+    this.savePref();
+    const presetId = (this.config.theme && this.config.theme.presetId) || 'berry';
+    const tokens = (THEMES[presetId] && THEMES[presetId].tokens) || this.config.theme.tokens;
     this.applyTheme(tokens);
-    const msg = newMode === 'dark' 
-      ? (this.lang === 'ku' ? 'دۆخی تاریک چالاککرا' : 'Dark theme activated') 
-      : (this.lang === 'ku' ? 'دۆخی ڕووناک چالاککرا' : 'Light theme activated');
-    this.showToast(msg, 'info');
+    this.announce(this.themeModePref === 'dark' ? this.t('darkModeOn') : this.t('darkModeOff'));
   },
 
-  setThemeMode(mode) {
-    if (!this.config.theme) this.config.theme = { presetId: 'berry', autoDark: false };
-    this.config.theme.mode = mode;
-    this.saveConfig();
+
+  // Shop default (Theme tab). Visitors who picked a mode themselves keep their choice.
+  async setThemeMode(mode) {
+    const ok = await this.commitConfig('theme', c => { c.theme = { ...c.theme, mode: mode === 'dark' ? 'dark' : 'light' }; return null; });
+    if (!ok) return;
+    this.themeModePref = null;
+    this.savePref();
     const presetId = this.config.theme.presetId || 'berry';
-    const tokens = (THEMES[presetId] && THEMES[presetId].tokens) ? THEMES[presetId].tokens : this.config.theme.tokens;
-    this.applyTheme(tokens);
-    const panelContent = document.getElementById('panelContent');
-    if (panelContent && document.getElementById('panelTitle')?.textContent === this.t('tabTheme')) {
-      this.renderThemeTab(panelContent);
+    this.applyTheme((THEMES[presetId] && THEMES[presetId].tokens) || this.config.theme.tokens);
+    if (this.activePanelTab === 'theme') this.renderThemeTab(document.getElementById('panelContent'));
+  },
+
+
+  async toggleWatermarkSetting(checked) {
+    const ok = await this.commitConfig('watermark', c => { c.showWatermark = Boolean(checked); return null; });
+    if (!ok) {
+      const box = document.getElementById('cfgWatermark');
+      if (box) box.checked = !checked;
     }
-    const msg = mode === 'dark' 
-      ? (this.lang === 'ku' ? 'دۆخی تاریک چالاککرا' : 'Dark theme activated') 
-      : (this.lang === 'ku' ? 'دۆخی ڕووناک چالاککرا' : 'Light theme activated');
-    this.showToast(msg, 'info');
   },
 
-  toggleWatermarkSetting(checked) {
-    this.config.showWatermark = Boolean(checked);
-    this.saveConfig();
-    this.renderWatermark();
-    this.showToast(this.t('toastSaved'), 'success');
-  },
 
   getDraftEconomy() {
     const savedEco = (this.config && this.config.economy) || DEFAULT_ECONOMY;
@@ -5661,14 +5824,14 @@ const app = {
     const curSum = document.getElementById('ecoCurrenciesSummary');
     if (curSum) {
       curSum.textContent = (eco.showSecondary && eco.secondaryCurrency && eco.secondaryCurrency !== 'None')
-        ? `USD + ${eco.secondaryCurrency} (${eco.currencySymbol || 'د.ع'})`
+        ? `USD + ${escapeHTML(eco.secondaryCurrency)} (${escapeHTML(eco.currencySymbol || 'د.ع')})`
         : 'USD only';
     }
 
     const exSum = document.getElementById('ecoExchangeSummary');
     if (exSum) {
       const formattedRate = new Intl.NumberFormat('en-US').format(eco.exchangeRate || 1310);
-      const ruleText = eco.roundingRule > 1 ? `Nearest ${eco.roundingRule}` : 'Exact (cents)';
+      const ruleText = eco.roundingRule > 1 ? `Nearest ${escapeHTML(eco.roundingRule)}` : 'Exact (cents)';
       exSum.textContent = `1 USD = ${formattedRate} ${eco.secondaryCurrency} · ${ruleText}`;
     }
 
@@ -5677,7 +5840,7 @@ const app = {
       if (eco.pickupOnly) {
         delSum.textContent = 'Pickup only';
       } else {
-        const freeText = eco.freeDeliveryOver > 0 ? `Free over $${eco.freeDeliveryOver}` : 'All-order free';
+        const freeText = eco.freeDeliveryOver > 0 ? `Free over $${escapeHTML(eco.freeDeliveryOver)}` : 'All-order free';
         delSum.textContent = `$${eco.deliveryFee} flat · ${freeText} · Min $${eco.minimumOrder}`;
       }
     }
@@ -5696,7 +5859,7 @@ const app = {
       if (!eco.promoCode) {
         discSum.textContent = 'No active code';
       } else {
-        const valText = eco.promoType === 'percent' ? `${eco.promoValue}%` : `$${eco.promoValue}`;
+        const valText = eco.promoType === 'percent' ? `${escapeHTML(eco.promoValue)}%` : `$${escapeHTML(eco.promoValue)}`;
         discSum.textContent = `${eco.promoCode} (${valText} off)`;
       }
     }
@@ -5755,13 +5918,13 @@ const app = {
         rounded = Math.round(raw * 100) / 100;
       }
       const sym = eco.currencySymbol || 'د.ع';
-      secondaryTotalStr = rule > 1 ? `${new Intl.NumberFormat('en-US').format(rounded)} ${sym}` : `${sym} ${rounded.toFixed(2)}`;
+      secondaryTotalStr = rule > 1 ? `${escapeHTML(new Intl.NumberFormat('en-US').format(rounded))} ${escapeHTML(sym)}` : `${escapeHTML(sym)} ${escapeHTML(rounded.toFixed(2))}`;
 
       const unrounded = totalUSD * eco.exchangeRate;
       if (rule > 1 && Math.abs(rounded - unrounded) > 0.01) {
         roundingNote = `
-          <div style="font-size:0.75rem;color:rgba(255,255,255,0.65);text-align:right;margin-top:2px;">
-            Rounded from ${new Intl.NumberFormat('en-US').format(Math.round(unrounded))} ${sym} (nearest ${rule})
+          <div class="economy-preview-rounding">
+            Rounded from ${escapeHTML(new Intl.NumberFormat('en-US').format(Math.round(unrounded)))} ${escapeHTML(sym)} (nearest ${escapeHTML(rule)})
           </div>
         `;
       }
@@ -5776,15 +5939,15 @@ const app = {
     let rows = `
       <div class="economy-preview-line">
         <span>${this.t('subtotal')}</span>
-        <strong>$${sampleSubtotal.toFixed(2)}</strong>
+        <strong>$${escapeHTML(sampleSubtotal.toFixed(2))}</strong>
       </div>
     `;
 
     if (bd.discount > 0) {
       rows += `
         <div class="economy-preview-line" style="color:#4ade80;">
-          <span>${this.t('discount')} (${bd.promoCodeName})</span>
-          <strong>−$${bd.discount.toFixed(2)}</strong>
+          <span>${this.t('discount')} (${escapeHTML(bd.promoCodeName)})</span>
+          <strong>−$${escapeHTML(bd.discount.toFixed(2))}</strong>
         </div>
       `;
     }
@@ -5807,7 +5970,7 @@ const app = {
       rows += `
         <div class="economy-preview-line">
           <span>${this.t('deliveryFee')}</span>
-          <strong>$${bd.delivery.toFixed(2)}</strong>
+          <strong>$${escapeHTML(bd.delivery.toFixed(2))}</strong>
         </div>
       `;
     }
@@ -5815,14 +5978,14 @@ const app = {
     if (bd.tax > 0) {
       rows += `
         <div class="economy-preview-line">
-          <span>${this.t('tax')} (${bd.taxLabel} ${bd.taxRate}%)</span>
-          <strong>+$${bd.tax.toFixed(2)}</strong>
+          <span>${this.t('tax')} (${escapeHTML(bd.taxLabel)} ${escapeHTML(bd.taxRate)}%)</span>
+          <strong>+$${escapeHTML(bd.tax.toFixed(2))}</strong>
         </div>
       `;
     } else if (eco.taxEnabled && eco.taxIncluded && eco.taxRate > 0) {
       rows += `
         <div class="economy-preview-line" style="color:rgba(255,255,255,0.65);font-size:0.78rem;">
-          <span>${eco.taxLabel} (${eco.taxRate}% included)</span>
+          <span>${escapeHTML(eco.taxLabel)} (${escapeHTML(eco.taxRate)}% included)</span>
           <span>Included</span>
         </div>
       `;
@@ -5832,8 +5995,8 @@ const app = {
       <div class="economy-preview-total">
         <span>${this.t('total')}</span>
         <div style="text-align:right;">
-          <div style="font-size:1.2rem;font-weight:700;color:var(--gold-soft,#eab308);">$${totalUSD.toFixed(2)}</div>
-          ${hasSecondary ? `<div style="font-size:0.88rem;color:rgba(255,255,255,0.75);margin-top:2px;">${secondaryTotalStr}</div>${roundingNote}` : ''}
+          <div class="economy-preview-total-value">$${escapeHTML(totalUSD.toFixed(2))}</div>
+          ${hasSecondary ? `<div class="economy-preview-secondary">${secondaryTotalStr}</div>${roundingNote}` : ''}
         </div>
       </div>
     `;
@@ -5841,7 +6004,7 @@ const app = {
     if (!bd.minOrderMet) {
       rows += `
         <div class="economy-preview-alert">
-          ⚠️ Min order ($${eco.minimumOrder.toFixed(2)}) not met. Sample is $${sampleSubtotal.toFixed(2)}.
+          ⚠️ Min order ($${escapeHTML(eco.minimumOrder.toFixed(2))}) not met. Sample is $${escapeHTML(sampleSubtotal.toFixed(2))}.
         </div>
       `;
     }
@@ -5849,43 +6012,33 @@ const app = {
     previewEl.innerHTML = rows;
   },
 
-  saveEconomySettings(e) {
+  async saveEconomySettings(e) {
     if (e) e.preventDefault();
-
     const saveBtn = document.getElementById('btnSaveEconomy');
     if (saveBtn) {
       saveBtn.disabled = true;
-      saveBtn.innerHTML = `<span class="btn-spinner"></span> ${this.t('saveEconomy')}`;
+      saveBtn.textContent = this.t('statusSaving');
     }
-
     const draftEco = this.getDraftEconomy();
     draftEco.lastUpdatedRate = Date.now();
+    const lead = parseInt(document.getElementById('cfgLeadTime')?.value, 10);
+    draftEco.leadTimeHours = Number.isFinite(lead) && lead >= 0 && lead <= 720 ? lead : leadHours(this.config.economy);
 
-    this.config.economy = draftEco;
-
-    // Clean up legacy iqdRate
-    if (this.config.iqdRate !== undefined) {
-      delete this.config.iqdRate;
-    }
-
-    this.saveConfig();
-    this._draftEconomy = null;
-    this.applyEconomy();
-
-    const tsBadge = document.getElementById('lastUpdatedRateText');
-    if (tsBadge) {
-      tsBadge.textContent = new Date(draftEco.lastUpdatedRate).toLocaleDateString();
-    }
-
-    setTimeout(() => {
-      if (saveBtn) {
-        saveBtn.innerHTML = this.t('saveEconomy');
-        saveBtn.disabled = true;
-      }
+    const ok = await this.commitConfig('economy', c => { c.economy = draftEco; return null; }, { quiet: true });
+    if (saveBtn) saveBtn.textContent = this.t('saveEconomy');
+    if (ok) {
+      this._draftEconomy = null;
+      this.applyEconomy();
+      const tsBadge = document.getElementById('lastUpdatedRateText');
+      if (tsBadge) tsBadge.textContent = new Date(draftEco.lastUpdatedRate).toLocaleDateString();
+      if (saveBtn) saveBtn.disabled = true;
       this.showModalToast(this.t('toastSaved'), 'success');
       this.updateEconomyPreview();
-    }, 250);
+    } else if (saveBtn) {
+      saveBtn.disabled = false;
+    }
   },
+
 
   // Product Selector & Live Editor
   selectProductForEditing(prodId) {
@@ -5920,18 +6073,18 @@ const app = {
     area.innerHTML = `
       <div style="background:var(--cream);padding:22px;border-radius:var(--radius-card);border:1px solid var(--line);margin-top:14px;">
         <h5 style="font-family:var(--font-serif);font-size:1.15rem;margin:0 0 16px 0;display:flex;align-items:center;gap:8px;">
-          <span>${prod.emoji || '🎂'}</span>
-          <span>${prod.name.en || 'Untitled Product'}</span>
-          <span style="font-size:0.85rem;color:var(--muted);font-family:var(--font-sans);font-weight:normal;">($${prod.priceUSD})</span>
+          <span>${escapeHTML(prod.emoji || '🎂')}</span>
+          <span>${escapeHTML(prod.name.en || 'Untitled Product')}</span>
+          <span style="font-size:0.85rem;color:var(--muted);font-family:var(--font-sans);font-weight:normal;">($${escapeHTML(prod.priceUSD)})</span>
         </h5>
 
         <!-- Photo Uploader -->
         <div class="photo-uploader">
           <div class="photo-uploader__preview" id="prodPreview">
             ${hasImage ? `
-              <img src="${currentImg}" alt="${(prod.name.en || 'Product Preview').replace(/"/g, '&quot;')}" referrerpolicy="no-referrer" />
+              <img src="${escapeHTML(currentImg)}" alt="${escapeHTML((prod.name.en || 'Product Preview'))}" referrerpolicy="no-referrer" />
             ` : `
-              <div class="preview-emoji">${prod.emoji || '🎂'}</div>
+              <div class="preview-emoji">${escapeHTML(prod.emoji || '🎂')}</div>
               <div class="preview-hint">${this.t('noPhotoHint')}</div>
             `}
           </div>
@@ -5960,7 +6113,7 @@ const app = {
           <div class="form-row">
             <div class="form-group">
               <label class="form-label" for="pEditEmoji">Emoji Fallback Icon</label>
-              <input type="text" id="pEditEmoji" class="form-input" value="${prod.emoji || '🎂'}" required />
+              <input type="text" id="pEditEmoji" class="form-input" value="${escapeHTML(prod.emoji || '🎂')}" required />
             </div>
             <div class="form-group">
               <label class="form-label" for="pEditCat">Category</label>
@@ -5975,18 +6128,18 @@ const app = {
           <div class="form-row">
             <div class="form-group">
               <label class="form-label" for="pEditNameEn">Name (English)</label>
-              <input type="text" id="pEditNameEn" class="form-input" value="${(prod.name.en || '').replace(/"/g, '&quot;')}" required />
+              <input type="text" id="pEditNameEn" class="form-input" value="${escapeHTML((prod.name.en || ''))}" required />
             </div>
             <div class="form-group">
               <label class="form-label" for="pEditNameKu">Name (Kurdish)</label>
-              <input type="text" id="pEditNameKu" class="form-input" value="${(prod.name.ku || '').replace(/"/g, '&quot;')}" required />
+              <input type="text" id="pEditNameKu" class="form-input" value="${escapeHTML((prod.name.ku || ''))}" required />
             </div>
           </div>
 
           <div class="form-row">
             <div class="form-group">
               <label class="form-label" for="pEditPrice">Price (USD)</label>
-              <input type="number" id="pEditPrice" class="form-input" value="${prod.priceUSD}" step="0.5" min="1" required />
+              <input type="number" id="pEditPrice" class="form-input" value="${escapeHTML(prod.priceUSD)}" step="0.5" min="1" required />
             </div>
             <div class="form-group">
               <label class="form-label" for="pEditTag">Product Tag</label>
@@ -6004,37 +6157,37 @@ const app = {
           <div class="form-row">
             <div class="form-group">
               <label class="form-label" for="pEditUnitEn">Serving Unit (English)</label>
-              <input type="text" id="pEditUnitEn" class="form-input" value="${(prod.unit?.en || '8\" Cake (10-12 slices)').replace(/"/g, '&quot;')}" required />
+              <input type="text" id="pEditUnitEn" class="form-input" value="${escapeHTML((prod.unit?.en || '8\" Cake (10-12 slices)'))}" required />
             </div>
             <div class="form-group">
               <label class="form-label" for="pEditUnitKu">Serving Unit (Kurdish)</label>
-              <input type="text" id="pEditUnitKu" class="form-input" value="${(prod.unit?.ku || 'کێکی ٨ ئینچ (١٠-١٢ پارچە)').replace(/"/g, '&quot;')}" required />
+              <input type="text" id="pEditUnitKu" class="form-input" value="${escapeHTML((prod.unit?.ku || 'کێکی ٨ ئینچ (١٠-١٢ پارچە)'))}" required />
             </div>
           </div>
 
           <div class="form-group">
             <label class="form-label" for="pEditDescEn">Description (English)</label>
-            <textarea id="pEditDescEn" class="form-textarea" rows="2">${prod.desc?.en || ''}</textarea>
+            <textarea id="pEditDescEn" class="form-textarea" rows="2">${escapeHTML(prod.desc?.en || '')}</textarea>
           </div>
 
           <div class="form-group">
             <label class="form-label" for="pEditDescKu">Description (Kurdish)</label>
-            <textarea id="pEditDescKu" class="form-textarea" rows="2">${prod.desc?.ku || ''}</textarea>
+            <textarea id="pEditDescKu" class="form-textarea" rows="2">${escapeHTML(prod.desc?.ku || '')}</textarea>
           </div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label" for="pEditExEn">Exclusions (English, comma separated)</label>
-              <input type="text" id="pEditExEn" class="form-input" value="${(prod.exclusions || []).map(e => e.en).join(', ').replace(/"/g, '&quot;')}" placeholder="e.g. Nuts, Frosting" />
+              <input type="text" id="pEditExEn" class="form-input" value="${escapeHTML((prod.exclusions || []).map(e => e.en).join(', '))}" placeholder="e.g. Nuts, Frosting" />
             </div>
             <div class="form-group">
               <label class="form-label" for="pEditExKu">Exclusions (Kurdish, comma separated)</label>
-              <input type="text" id="pEditExKu" class="form-input" value="${(prod.exclusions || []).map(e => e.ku).join(', ').replace(/"/g, '&quot;')}" placeholder="e.g. گوێز, کرێم" />
+              <input type="text" id="pEditExKu" class="form-input" value="${escapeHTML((prod.exclusions || []).map(e => e.ku).join(', '))}" placeholder="e.g. گوێز, کرێم" />
             </div>
           </div>
 
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:20px;flex-wrap:wrap;">
             <button type="submit" class="btn btn--primary">${this.t('btnSaveProduct')}</button>
-            <button type="button" class="btn btn--ghost" style="color:#b91c1c;border-color:#fca5a5;" onclick="app.deleteProduct('${prod.id}')">${this.t('btnDeleteProduct')}</button>
+            <button type="button" class="btn btn--ghost" style="color:#b91c1c;border-color:#fca5a5;" onclick="app.deleteProduct(${jsArg(prod.id)})">${this.t('btnDeleteProduct')}</button>
           </div>
         </form>
       </div>
@@ -6056,7 +6209,7 @@ const app = {
       // Update preview element
       const previewEl = document.getElementById('prodPreview');
       if (previewEl) {
-        previewEl.innerHTML = `<img src="${dataUrl}" alt="Product Preview" />`;
+        previewEl.innerHTML = `<img src="${escapeHTML(dataUrl)}" alt="Product Preview" />`;
       }
 
       // Update button text
@@ -6084,39 +6237,27 @@ const app = {
     }
   },
 
+  // Removes the photo from the form; the change is stored when the product is saved.
   removeProductPhoto() {
     this.pendingImageData = '';
     const prod = this.products.find(p => p.id === this.selectedProductId);
-    if (prod) {
-      prod.img = '';
-      this.saveProducts();
-      this.renderMenu();
-    }
-
     const previewEl = document.getElementById('prodPreview');
     if (previewEl) {
-      const emoji = prod ? prod.emoji || '🎂' : '🎂';
       previewEl.innerHTML = `
-        <div class="preview-emoji">${emoji}</div>
-        <div class="preview-hint">${this.t('noPhotoHint')}</div>
-      `;
+        <div class="preview-emoji">${escapeHTML(prod ? prod.emoji || '🎂' : '🎂')}</div>
+        <div class="preview-hint">${escapeHTML(this.t('noPhotoHint'))}</div>`;
     }
-
     const labelText = document.getElementById('uploadBtnText');
-    if (labelText) {
-      labelText.textContent = this.t('uploadPhoto');
-    }
-
+    if (labelText) labelText.textContent = this.t('uploadPhoto');
     const removeBtn = document.getElementById('btnRemovePhoto');
-    if (removeBtn) {
-      removeBtn.style.display = 'none';
-    }
-
-    this.showToast(this.t('prodPhotoRemoved'), 'info');
+    if (removeBtn) removeBtn.style.display = 'none';
+    this.showToast(this.t('prodPhotoRemovedPending'), 'info');
   },
 
+
+  // New products exist only in the form until "Save" succeeds.
   addNewProduct() {
-    const newId = 'p_' + Date.now();
+    const newId = 'p_' + Date.now().toString(36);
     const freshProd = {
       id: newId,
       category: 'cakes',
@@ -6126,170 +6267,155 @@ const app = {
       tag: 'none',
       name: { en: 'New Artisanal Cake', ku: 'کێکی دەستکردی نوێ' },
       desc: { en: 'Handcrafted sponge layered with fresh cream and seasonal fruits.', ku: 'کێکی دەستکرد بە کرێمی تازە و میوەی وەرزی.' },
-      unit: { en: '8" Cake (10-12 slices)', ku: 'کێکی ٨ ئینچ (١٠-١٢ پارچە)' }
+      unit: { en: '8" Cake (10-12 slices)', ku: 'کێکی ٨ ئینچ (١٠-١٢ پارچە)' },
+      _unsaved: true,
     };
     this.products.unshift(freshProd);
     this.selectedProductId = newId;
     this.pendingImageData = '';
-    this.saveProducts();
-    this.renderMenu();
     this.renderPanelTab('products');
-    this.showToast(this.t('toastSaved'), 'success');
+    this.showToast(this.t('prodNewDraft'), 'info');
   },
 
-  saveProductData(e) {
+
+  async saveProductData(e) {
     e.preventDefault();
-    const prod = this.products.find(p => p.id === this.selectedProductId);
-    if (!prod) return;
-
-    const emoji = document.getElementById('pEditEmoji').value.trim() || '🎂';
-    const category = document.getElementById('pEditCat').value;
-    const nameEn = document.getElementById('pEditNameEn').value.trim();
-    const nameKu = document.getElementById('pEditNameKu').value.trim();
-    const priceUSD = parseFloat(document.getElementById('pEditPrice').value) || 20;
-    const tag = document.getElementById('pEditTag').value;
-    const unitEn = document.getElementById('pEditUnitEn').value.trim();
-    const unitKu = document.getElementById('pEditUnitKu').value.trim();
-    const descEn = document.getElementById('pEditDescEn').value.trim();
-    const descKu = document.getElementById('pEditDescKu').value.trim();
-
-    const exEn = document.getElementById('pEditExEn').value.split(',').map(s=>s.trim()).filter(Boolean);
-    const exKu = document.getElementById('pEditExKu').value.split(',').map(s=>s.trim()).filter(Boolean);
-    const exclusions = [];
-    const maxLen = Math.max(exEn.length, exKu.length);
-    for (let i = 0; i < maxLen; i++) {
-      if (exEn[i] || exKu[i]) {
-        exclusions.push({
-          id: (exEn[i] || exKu[i] || `ex${i}`).replace(/\s+/g, '_').toLowerCase(),
-          en: exEn[i] || '',
-          ku: exKu[i] || ''
-        });
-      }
-    }
-    prod.exclusions = exclusions.length > 0 ? exclusions : null;
-
-    prod.emoji = emoji;
-    prod.category = category;
-    prod.name = { en: nameEn, ku: nameKu };
-    prod.priceUSD = priceUSD;
-    prod.tag = tag;
-    prod.unit = { en: unitEn, ku: unitKu };
-    prod.desc = { en: descEn, ku: descKu };
-    prod.img = this.pendingImageData || '';
-
-    const saved = this.saveProducts();
-    if (saved) {
-      this.renderMenu();
-      this.renderPanelTab('products');
-      this.showToast(this.t('toastSaved'), 'success');
-    }
-  },
-
-  deleteProduct(id) {
-    const modal = document.getElementById('customConfirmModal');
-    const msg = document.getElementById('confirmMessage');
-    const btnCancel = document.getElementById('confirmCancelBtn');
-    const btnOk = document.getElementById('confirmOkBtn');
-    
-    msg.textContent = this.t('prodDeleteConfirm') || 'Are you sure you want to delete this product?';
-    
-    const cleanup = () => {
-      modal.classList.remove('is-open');
-      btnCancel.onclick = null;
-      btnOk.onclick = null;
-    };
-    
-    btnCancel.onclick = cleanup;
-    
-    btnOk.onclick = () => {
-      cleanup();
-      const oldLen = this.products.length;
-      this.products = this.products.filter(p => p.id !== id);
-      this.order = this.order.filter(item => item.productId !== id);
-      
-      this.selectedProductId = this.products.length > 0 ? this.products[0].id : null;
-      this.pendingImageData = this.selectedProductId && this.products.length > 0 && this.products[0].img ? this.products[0].img : '';
-      
-      this.saveProducts(); if (db) { deleteDoc(doc(db, 'products', id)).catch(e => handleFirestoreError(e, OperationType.DELETE, 'products')); }
-      this.renderMenu();
-      this.renderTray();
-      this.renderPanelTab('products');
-      this.showToast(this.t('toastDeleted') || 'Deleted', 'success');
-    };
-    
-    modal.classList.add('is-open');
-    return;
-  },
-
-  // User Management
-  showAddStaffModal() {
-    document.getElementById('promptUsername').value = '';
-    document.getElementById('promptPassword').value = '';
-    document.getElementById('promptName').value = '';
-    document.getElementById('promptRole').value = 'staff';
-    
-    // Clear checkboxes
-    const checkboxes = document.querySelectorAll('input[name="staffPerms"]');
-    checkboxes.forEach(cb => cb.checked = false);
-
-    document.getElementById('customPromptModal').classList.add('is-open');
-  },
-  
-  submitAddStaff(e) {
-    e.preventDefault();
-    const username = document.getElementById('promptUsername').value.trim();
-    const password = document.getElementById('promptPassword').value.trim();
-    const name = document.getElementById('promptName').value.trim() || username;
-    const role = document.getElementById('promptRole').value;
-    
-    // Gather permissions
-    const permissions = [];
-    document.querySelectorAll('input[name="staffPerms"]:checked').forEach(cb => {
-      permissions.push(cb.value);
-    });
-    
-    if (password.length < 4) {
-      this.showToast('Password must be at least 4 characters.', 'error');
+    const current = this.products.find(p => p.id === this.selectedProductId);
+    if (!current) return;
+    const v = id => document.getElementById(id).value.trim();
+    const priceUSD = parseFloat(document.getElementById('pEditPrice').value);
+    if (!Number.isFinite(priceUSD) || priceUSD < 0 || priceUSD > 100000) {
+      this.showToast(this.t('prodPriceInvalid'), 'error');
       return;
     }
-    
-    this.users.push({
-      id: 's_' + Date.now(),
-      username,
-      password,
-      name,
-      role,
-      permissions
-    });
-    this.saveUsers();
-    this.renderPanelTab('users');
-    this.showToast(this.t('staffAdded') || 'Staff added', 'success');
-    document.getElementById('customPromptModal').classList.remove('is-open');
+    const exEn = v('pEditExEn').split(',').map(s => s.trim()).filter(Boolean);
+    const exKu = v('pEditExKu').split(',').map(s => s.trim()).filter(Boolean);
+    const exclusions = [];
+    for (let i = 0; i < Math.max(exEn.length, exKu.length); i++) {
+      if (exEn[i] || exKu[i]) {
+        exclusions.push({ id: (exEn[i] || exKu[i] || `ex${i}`).replace(/\s+/g, '_').toLowerCase().slice(0, 40), en: exEn[i] || '', ku: exKu[i] || '' });
+      }
+    }
+    const next = {
+      id: current.id,
+      emoji: v('pEditEmoji') || '🎂',
+      category: document.getElementById('pEditCat').value,
+      name: { en: v('pEditNameEn'), ku: v('pEditNameKu') },
+      priceUSD,
+      tag: document.getElementById('pEditTag').value,
+      unit: { en: v('pEditUnitEn'), ku: v('pEditUnitKu') },
+      desc: { en: v('pEditDescEn'), ku: v('pEditDescKu') },
+      exclusions: exclusions.length ? exclusions.slice(0, 20) : null,
+      img: this.pendingImageData || '',
+    };
+    if (!next.name.en) {
+      this.showToast(this.t('errFillFields'), 'error');
+      return;
+    }
+    const ok = await this.saveProduct(next);
+    if (!ok) return;
+    const idx = this.products.findIndex(p => p.id === next.id);
+    if (idx > -1) this.products[idx] = this.normalizeProduct(next);
+    this.cacheSet(KEYS.PRODUCTS, this.products);
+    this.cacheSet(KEYS.PRODUCTS_REMOTE, true);
+    this.renderMenu();
+    this.renderPanelTab('products');
   },
+
+
+  async deleteProduct(id) {
+    const prod = this.products.find(p => p.id === id);
+    if (!prod) return;
+    const ok = await this.confirmDialog({
+      title: this.t('prodDeleteTitle'),
+      message: this.t('prodDeleteConfirm'),
+      okLabel: this.t('usersDelete'),
+      danger: true,
+    });
+    if (!ok) return;
+    if (!prod._unsaved) {
+      const deleted = await this.runWrite(() => store.deleteProduct(id), { successMsg: this.t('toastDeleted') });
+      if (!deleted) return;
+    }
+    this.products = this.products.filter(p => p.id !== id);
+    this.cacheSet(KEYS.PRODUCTS, this.products);
+    this.cart = sanitizeCart(this.cart, this.products);
+    this.persistCart();
+    this.selectedProductId = this.products.length ? this.products[0].id : null;
+    this.pendingImageData = this.products.length ? (this.products[0].img || '') : '';
+    this.renderMenu();
+    this.renderTray();
+    this.renderPanelTab('products');
+  },
+
+
+  // User Management
+  // Add or edit a staff directory entry (uid + email from Firebase Authentication).
+  showAddStaffModal(entry = null) {
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    set('promptUid', entry ? entry.uid : '');
+    set('promptEmail', entry ? (entry.email || '') : '');
+    set('promptName', entry ? (entry.name || '') : '');
+    set('promptRole', entry ? entry.role : 'staff');
+    const uidInput = document.getElementById('promptUid');
+    if (uidInput) uidInput.readOnly = Boolean(entry);
+    document.querySelectorAll('input[name="staffPerms"]').forEach(cb => {
+      cb.checked = Boolean(entry && Array.isArray(entry.perms) && entry.perms.includes(cb.value));
+    });
+    this.setAuthMessage('staffFormMessage', '');
+    this.openDialog('customPromptModal');
+  },
+
+  
+  async submitAddStaff(e) {
+    e.preventDefault();
+    const uid = document.getElementById('promptUid').value.trim();
+    const email = document.getElementById('promptEmail').value.trim();
+    const name = document.getElementById('promptName').value.trim();
+    const role = document.getElementById('promptRole').value === 'admin' ? 'admin' : 'staff';
+    const perms = [...document.querySelectorAll('input[name="staffPerms"]:checked')].map(cb => cb.value).filter(p => STAFF_PERMS.includes(p));
+    if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) {
+      this.setAuthMessage('staffFormMessage', this.t('staffUidInvalid'));
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      this.setAuthMessage('staffFormMessage', this.t('authErr_badEmail'));
+      return;
+    }
+    const ok = await this.runWrite(() => store.saveStaffEntry(uid, { email, name, role, perms: role === 'staff' ? perms : [] }, this.session?.uid), { successMsg: this.t('staffSavedHint') });
+    if (ok) this.closeDialog('customPromptModal');
+  },
+
 
   // Data Export / Import / Reset
-  importJsonData() {
+  // Imports shop content (config + products). Accounts are never imported.
+  async importJsonData() {
+    let parsed;
     try {
-      const box = document.getElementById('dataJsonBox');
-      const parsed = JSON.parse(box.value);
-      if (!parsed.config || !parsed.products || !parsed.users) {
-        throw new Error('Missing top-level keys');
-      }
-
-      this.config = parsed.config;
-      this.products = parsed.products;
-      this.users = parsed.users;
-
-      this.saveConfig();
-      this.saveProducts();
-      this.saveUsers();
-
-      this.renderAll();
-      this.showToast(this.t('backupImported'), 'success');
+      parsed = JSON.parse(document.getElementById('dataJsonBox').value);
+      if (!parsed || typeof parsed.config !== 'object' || !Array.isArray(parsed.products)) throw new Error('shape');
     } catch {
       this.showToast(this.t('toastInvalidJson'), 'error');
+      return;
+    }
+    const ok = await this.confirmDialog({ title: this.t('importTitle'), message: this.t('importConfirm'), okLabel: this.t('importBtn') });
+    if (!ok) return;
+    const config = this.normalizeConfig(parsed.config);
+    const products = parsed.products.map(p => this.normalizeProduct(p)).filter(Boolean);
+    const sections = ['brand', 'theme', 'about', 'faq', 'reviews', 'contact', 'socials', 'economy', 'fonts'];
+    let saved = await this.runWrite(async () => {
+      const partial = {};
+      sections.flatMap(s => this.configKeysFor(s)).forEach(k => { if (config[k] !== undefined) partial[k] = config[k]; });
+      await store.savePublicConfig(partial, this.session?.uid);
+      for (const p of products) await store.saveProduct(p, this.session?.uid);
+    }, { successMsg: this.t('backupImported') });
+    if (saved) {
+      this.config = config;
+      this.products = products;
+      this.renderAll();
     }
   },
+
 
   copyJsonData() {
     const box = document.getElementById('dataJsonBox');
@@ -6304,19 +6430,18 @@ const app = {
     }
   },
 
-  factoryReset() {
-    if (!confirm('Are you sure? This will wipe all changes, restore factory defaults, and log you out.')) return;
-    localStorage.removeItem(KEYS.CONFIG);
-    localStorage.removeItem(KEYS.PRODUCTS);
-    localStorage.removeItem(KEYS.USERS);
-    localStorage.removeItem(KEYS.SESSION);
-    localStorage.removeItem(KEYS.PREF);
-
+  // Clears what this browser has cached. The live shop data in Firestore is not touched.
+  async factoryReset() {
+    const ok = await this.confirmDialog({ title: this.t('resetDeviceTitle'), message: this.t('resetDeviceConfirm'), okLabel: this.t('resetDeviceBtn'), danger: true });
+    if (!ok) return;
+    [KEYS.CONFIG, KEYS.PRODUCTS, KEYS.PRODUCTS_REMOTE, KEYS.MY_ORDERS, KEYS.GUEST, 'ys_cart_v1'].forEach(k => {
+      try { localStorage.removeItem(k); } catch { /* ignore */ }
+    });
     this.loadState();
     this.renderAll();
-    this.closePanelModal();
-    this.showToast(this.t('factoryResetDone'), 'success');
+    this.showToast(this.t('resetDeviceDone'), 'success');
   },
+
 
   // Watermark Pill ("developed with respect and love by null-tech")
   renderWatermark() {
@@ -6358,6 +6483,9 @@ const app = {
     const btn = document.getElementById('burgerBtn');
     if (!nav || !btn) return;
 
+    const header = document.getElementById('mainHeader');
+    if (header) nav.style.top = `${Math.max(0, header.getBoundingClientRect().bottom)}px`;
+
     const isOpen = nav.classList.toggle('is-open');
     btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
   },
@@ -6391,20 +6519,40 @@ const app = {
       }
     }, { passive: true });
 
-    // Close Modals on Backdrop Click & Escape Key
-    ['authModal', 'panelModal', 'historyModal'].forEach(id => {
+    this.setupScrollSpy();
+
+    // Close dialogs on backdrop click
+    ['authModal', 'staffAuthModal', 'panelModal', 'historyModal', 'submitReviewModal', 'customPromptModal'].forEach(id => {
       const modal = document.getElementById(id);
       if (modal) {
+        modal.setAttribute('aria-hidden', 'true');
         modal.addEventListener('click', (e) => {
-          if (e.target === modal) {
-            modal.classList.remove('is-open');
-          }
+          if (e.target === modal) this.closeDialogById(id);
         });
       }
     });
 
-    // Close Mobile Nav on outside click
+    // Panel tabs: arrow-key navigation
+    const sidebar = document.getElementById('panelSidebar');
+    if (sidebar) sidebar.addEventListener('keydown', e => this.handlePanelTabKeys(e));
+
+    // Footer / hash route to the staff sign-in
+    window.addEventListener('hashchange', () => {
+      if (window.location.hash === '#staff') this.openStaffLogin();
+    });
+
+    // Checkout detail fields: keep the note in state, clear errors while typing
+    const note = document.getElementById('trayOrderNote');
+    if (note) note.addEventListener('input', () => { this.orderNote = note.value; });
+    ['trayCustName', 'trayFulfillmentDate'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', () => { if (el.getAttribute('aria-invalid')) this.setCheckoutError(''); });
+    });
+
+    // Close the account menu and mobile nav on outside click
     document.addEventListener('click', (e) => {
+      const menu = document.querySelector('.account-menu');
+      if (menu && !menu.contains(e.target)) this.closeAccountMenu();
       const nav = document.getElementById('mobileNav');
       const burger = document.getElementById('burgerBtn');
       if (nav && nav.classList.contains('is-open')) {
@@ -6425,22 +6573,60 @@ const app = {
         }
       }
 
+      // Open dialogs handle Escape and keep Tab focus inside themselves
+      if (this.handleDialogKeys(e)) return;
+
       if (e.key === 'Escape') {
         if (document.activeElement && document.activeElement.id === 'menuSearchInput') {
           document.activeElement.blur();
         }
-        this.closeAuthModal();
-        this.closePanelModal();
-        this.closeHistoryModal();
-        this.closeCustomerDrawer();
-        this.closeMobileMenu();
+        const accountList = document.getElementById('accountMenuList');
+        if (accountList && !accountList.hidden) {
+          this.closeAccountMenu();
+          document.getElementById('accountMenuToggle')?.focus();
+        } else if (document.getElementById('mobileNav')?.classList.contains('is-open')) {
+          this.closeMobileMenu();
+          document.getElementById('burgerBtn')?.focus();
+        } else if (this.trayBreakdownOpen) {
+          this.toggleTrayBreakdown(false);
+          document.getElementById('btnTrayToggle')?.focus();
+        }
       }
     });
+  },
+
+  // Highlight the nav link of the section currently on screen
+  setupScrollSpy() {
+    if (!('IntersectionObserver' in window)) return;
+    const links = document.querySelectorAll('#desktopNav .nav__link, #mobileNav .nav__link');
+    const ids = [...new Set([...links].map(a => a.getAttribute('href')).filter(h => h && h.startsWith('#')))];
+    // The why-us strip continues the story, so it keeps "Our Story" lit
+    const alias = { features: 'story' };
+    const sections = [...ids, '#features'].map(h => document.querySelector(h)).filter(Boolean);
+
+    const onScreen = new Set();
+    const spy = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) onScreen.add(entry.target);
+        else onScreen.delete(entry.target);
+      });
+      // Sections not in the nav (like the hero) clear the highlight
+      const current = sections.find(sec => onScreen.has(sec));
+      const href = current ? `#${alias[current.id] || current.id}` : null;
+      links.forEach(a => {
+        const active = a.getAttribute('href') === href;
+        a.classList.toggle('is-active', active);
+        if (active) a.setAttribute('aria-current', 'location');
+        else a.removeAttribute('aria-current');
+      });
+    }, { rootMargin: '-45% 0px -50% 0px' });
+    sections.forEach(sec => spy.observe(sec));
   },
 
   // Smooth Scroll Reveal via IntersectionObserver
   setupIntersectionObserver() {
     if (!('IntersectionObserver' in window)) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
     const observer = new IntersectionObserver((entries) => {
       entries.forEach((entry, index) => {
@@ -6457,6 +6643,8 @@ const app = {
 
     const targets = document.querySelectorAll('.feature-card, .cake-card, .step-card, .review-card, .faq-item, .info-card');
     targets.forEach(el => {
+      // Leave content that is already on screen alone so it never flashes out
+      if (el.getBoundingClientRect().top < window.innerHeight) return;
       el.style.opacity = '0';
       el.style.transform = 'translateY(24px)';
       el.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
